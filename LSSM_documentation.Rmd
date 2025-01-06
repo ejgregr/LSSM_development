@@ -1,0 +1,148 @@
+---
+title: "LSSM_documentation"
+author: "Edward Gregr"
+date: "2024-09-27"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Model overview
+This section describes the model components
+
+## Dynamic energy budget growth model
+The Dynamic energy budget (DEB) developed by XXX was calibrated for nereocystis by Barbosa. 
+
+The dynamics of the DEB are represented by three state variables: 
+  the structural mass = Mv (MolV), 
+  the nitrogen reserve density, meN = MeN/Mv (molN molV-1), 
+  and the carbon reserve density, meC = MeC/Mv (molC molV-1). MeC and MeN are the masses of the C and N reserves. 
+
+
+The DEB takes a table of [temperature, nutrients, dissolved inorganic carbon (DIC), and light] as an input:
+
+###Description and units for DEB inputs
+T =  K,          temperature
+N =  molN/L,     dissolved inorganic nitrogen concentration
+C =  molC/L,     dissolved inorganic carbon concentration
+I = molÎ³/m^2/d, photon concentration (= irradiance)
+
+The model returns a table of results for each time step. This table includes a few dozen parameters, with names that follow a standardized approach [see DEB book]:
+
+*j* represents a flux rate
+*E* represents a reserve (or energy) unit, for either N or C
+*M* represents molar mass 
+*V* represents the volume of the structure (i.e., frond) in L^3
+*G* is the growth pool for a flux
+*R* is the reproduction pool for a flux
+
+*y* represents yield factors that couple flux processes 
+*t* as a suffix on the variable names, it represents the time step of the variable
+
+
+Assimilation variable typical pathways:
+j_NA = molN/molV/h,   uptake rate of N
+j_CI = molDIC/molV/h, uptake rate of DIC
+j_I  = specific relaxation rate
+j_CA = molC/molV/h, DIC assimilation rate
+j_Ot  = O2 production
+j_Ct  = Carbon (where?)
+
+Allocation to growth:
+j_EN_G = specific flux of N to growth SU (after maintenance)
+j_EC_G = specific flux of C to growth SU (after maintenance)
+j_G    = gross specific growth rate
+
+Total weight and length are closely correlated, as length is a species-specific function of biomass.
+Wt        = g
+L_allomt = cm, physical length
+
+Integration of results into the state variables for next steps: 
+  M_V  = M_V + dMVdt * dt       The volume of the blade in terms of moles;
+  m_EN = m_EN + dmENdt * dt     The mass of the nitrogen reserve;
+  m_EC = m_EC + dmECdt * dt;    The mass of the carbon reserve
+  
+Molar weights (g/mol) are used for converting moles (the mass unit in the DEB) to grams. These are listed in Lavaud et al.'s Table 2. The values for carbon and nitrogen are higher than their atomic masses as they reflect the average molar mass for the compounds typically found in the reserve pool of organisms like kelp. Minerals and inorganics can also make up 15-25% of kelp's dry weight (DEB's typically estimate dry weight).
+Molar weight of structure wV      27.51
+Molar weight of N reserve wEN     17
+Molar weight of C reserve wEC     30
+
+# Data
+The various data sets used for this project are described here. 
+
+## Oceanographic data
+###Historic moorings
+BATI has 2023 data from 8 moorings in the region. Main ones of interest to this project are B5, which is in Blackfish Sound, and B6, which is in a sheltered location west of Gilford Island, not unlike the Village Island basin. MAPP also has 5 moorings in the area. Of interest may be M5 (in QCS) and M4 (at the entrance to Knight Inlet). NOTE: This numbering comes from Romina, unsure if its consistent with other descriptions of these data. 
+
+The BATI moorings include sensors at different depths:
+0.5 m = StarOddi CTD (T/S); 1.5 and 3 m: Hobo (T and Light); Bottom: T (sensor?). These data have been processed by Romina into a workable file of surface T/S with Station ID added (ctd_surface_cond_moorings2023.csv). A second file includes T at depth from the Hobo sensors on these moorings. 
+
+Light data from Hobos are challenging because the sensors foul up and need cleaning. The data thus need to be cleaned for the deteriorating light levels (this work is pending for Romina). 
+
+The MAPP moorings include a StarOddi only, collecting T/S at surface (~ 1m). These data have not yet been processed.
+
+```{r sensData, echo=FALSE, fig.pos='h', fig.cap="Temp and salt from the BATI 5 mooring", fig.align='center'}
+
+par(mfrow=c(2,1), mar=c(4,4,1,1) )
+plot( BATI5$temp, type='l', xlab="",  xaxt = "n", ylab="Temperature (C)" )
+plot( BATI5$salt, type='l', xlab="Cumulative hours", ylab="Salinity (psu)") 
+```
+
+### Other BATI ocean data
+T/S profiles were collected during kelp sampling. Likely only relevant to water column investigations. 
+Environmental button loggers (T only) distributed around the region and collecting data since 2022. Unclear on the number and locations, but should be useful for spatial variance in T. 
+
+## Field data 
+Field observations of nereo helped parameterize growth and distribution
+
+## Spatial data
+We built clusters to estimate the abundance and spatial distribution of nereocystis.
+
+# Methods
+
+## BUilding an environmental conditions layer
+The DEB model takes a table of [light, nutrients, temperature, and DIC] as input. 
+
+Currently, this is built with constant but randomized light, nutrients and DIC. Temperature is taken from the BATI5 sensor, with the intent of comparing the pH results to BATI6, thereby comparing a QCS reference (BATI5) with and estuarine site (BATI6).
+
+```{r envData, echo=FALSE, fig.pos='h', fig.cap="Preliminary Drivers of the Dynamic Energy Budget Model - BATI5", fig.align='center'}
+
+PlotInputs( grow_dat, "May to September Environmental Conditions")
+
+
+```
+# Results 
+Environmental layers are passed through a compilied DEB, leading to an assortment of outputs. 
+
+Relevant calculations include:
+
+Total C assimilated = sum of carbon assimilation per time step 
+                    = sum of assimilation rate * volume of kelp
+                    = sum( j_CAt [molC/molV/h] * M_Vt [molV] )
+
+This total partitions to growth and maintenance. 
+
+Total C fixed for growth = sum of carbon used for growth per time step
+                         = sum( j_EC_G [molC/molV/h] * M_Vt [molV] )
+
+The difference in these values would be the C used for maintenance, which is mostly released as respiration. 
+
+
+Next step is to figure out how to estimate change in DIC from the output data, along with a measure of total plant size. This would include using below-bulb stype diameter to estimate stipe mass, plus some number of fronds to multiply by the growth value. (These fronds will need to be shed at some rate ... see Canvin et al. 2024).
+
+ChatGPT says that a mature bull kelp (*Nereocystis luetkeana*) plant can have 30 - 50 blades, and that the stipe usually makes up around 20-40% of the total biomass, depending on age and growth stage, season, and environmental factors. 
+
+We can also assume that the growth of the entire plant follows the growth rate of a blade. 
+
+
+
+
+```{r DEBOut, echo=FALSE, fig.pos='h', fig.cap="Output from the DEB model - BATI5", fig.align='center'}
+PlotAllDEBResults( deb_output )
+```
+
+
+
+Fin.
