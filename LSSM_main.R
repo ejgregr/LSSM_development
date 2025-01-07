@@ -11,15 +11,6 @@
 # TO DO: 
 #  
 
-
-usethis::create_from_github(
-  "https://github.com/ejgregr/LSSM_development.git",
-  destdir = "c:/data/git/LSSM_development/"
-)
-
-https://github.com/ejgregr/LSSM_development.git
-
-
 #################################################################################
 
 rm(list=ls(all=T))  # Erase environment.
@@ -55,9 +46,6 @@ source( "LSSM_configuration.R" )
 # for (i in 1:length(oceanStates)) {
 #   cat(oceanStates[[ i ]]$month, " ")
 # }
-
-
-
 
 
 #==== WORKING ====
@@ -175,7 +163,9 @@ plot( deb_output$m_ECt, type='l', main = "Carbon reserve density", xlab="Hours",
 plot( deb_output$j_EC_G, type='l', main = "Flux of Carbon to growth", xlab="Hours" )
 
 
-#==== Describe the fates of the carbon assimilated ====
+#==== Efforts to understand what's going on with the fluxes, esp. the carbon assimilated ====
+
+
 # define index to final t 
 l_idx <- dim(deb_output)[[1]]
 
@@ -187,7 +177,7 @@ deb_output$Wt[l_idx]
 (deb_output$Wt[l_idx] - deb_output$Wt[1]) / deb_output$Wt[1]
 
 # Now weight should be equal to Mv + m_EC + m_EN, all multiplied by their molar masses ... 
-From Venolia - 
+#From Venolia - (tho for a different species)
 carbon = 30
 nitro = 54
 struct = 29.89
@@ -200,7 +190,7 @@ struct = 29.89
 
 
 # Understanding DIC flux:
-# Point is that Ct vs Ct_j. Feel like one should be CI. 
+# Point is Ct vs Ct_j. Feel like one should be CI. 
 
 hist( deb_output$M_Vt)
 plot( deb_output$j_Ct )

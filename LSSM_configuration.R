@@ -52,9 +52,6 @@ longitude <- -123.1207 # Vancouver's longitude
 data_dir <- "C:/Data/Git/LSSM/Data"
 DEB_dir  <- "C:/Data/Git/LSSM/DEB"
 
-DEB <- 
-
-
 
 #==== Functions ====
 
@@ -93,6 +90,7 @@ Load2023MooringData <- function(){
 # Create a DF that can be passed to the growth model.
 # Resolution and extents depend on the temperature data.
 # Currently dependent on BATI sensor measures processed by Barbosa.
+
 PrepSensorData <- function( moor_dat, smo, emo){
   
   # First pull hourly temp data for specified start/end months
@@ -174,6 +172,7 @@ CalculatePhotons <- function(solar_angle) {
 }
 
 
+
 #==== Plotting and data display ====
 
 PlotInputs <- function( indat, ptitle ){
@@ -240,8 +239,7 @@ InitializeClusters <- function( mapdat ){
                     carbA  = 1.0, 
                     carb   = 1.0,
                     bicarb = 1.0,
-                    ph     = 7.0
-  )  
+                    ph     = 7.0 )  
   
   z <- vector( "list", 6)
   
@@ -277,9 +275,8 @@ InitializeSimulation <- function( nMonths, firstMo, clusts ){
 }
 
 
-
+# Find the indices where the target string matches elements in the string vector
 monthIndex <- function(aMonth, moString) {
-  # Find the indices where the target string matches elements in the string vector
   index <- which(moString == aMonth)
   # If the string is not found, return NA
   if (length(index) == 0) {
@@ -290,9 +287,6 @@ monthIndex <- function(aMonth, moString) {
 }
 
 
-# FIN
-
-# FIN
 
 
 # Fin.
