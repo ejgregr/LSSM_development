@@ -32,8 +32,34 @@ version$version.string
 
 #==== Configuration ====
 
-moText <- c( "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+latitude  <- 49.2827 # Vancouver's latitude
+longitude <- -123.1207 # Vancouver's longitude
 
+data_dir <- "C:/Data/Git/LSSM_development/Data"
+DEB_dir  <- "C:/Data/Git/LSSM_development/DEB"
+
+# Growth period
+start_date <- as.POSIXct("2023-05-02 00:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
+end_date   <- as.POSIXct("2023-09-30 00:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
+difftime(end_date, start_date, units = "days")
+
+# Growth parameters
+B_init      <- 0.025  # Initial mass of sporophyte (est. at 25 mg based on ChatGPT)
+B_max       <- 9.23   # Max biomass for an adult Nereo. Calculated from field results (Weigel and Pfister 2021)
+r_max       <- 0.065  # Maximum daily growth rate, assuming 6 month growth and mature plant is 9.23 kg 
+sp_start    <- 0.005  # Established sporophyte mass (5 g)
+wet_to_dry  <- 0.13   # Water content of Nereo (Bullen et al. 2024)
+dry_to_C    <- 0.25   # Carbon content of Nereo (dry) (Bullen et al. 2024)
+
+#---- Environmental influence on growth rate ----
+T_opt     <- 10        # Optimal temperature (°C)
+T_max     <- 14        # Temperature range for growth (°C)
+DLI_opt   <- 30        # mol/m2/day
+DLI_range <- 20        # mol/m2/day (+/-)
+
+#---- Anticipated parameters  ----
+
+moText <- c( "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 # Elemental stuff in moles, complex/diverse molecules in g. 
 ounits <- list( sizeu = 'ha',
                 tempu = 'C',
@@ -43,15 +69,7 @@ ounits <- list( sizeu = 'ha',
                 DOCu  = 'g/m3',
                 POCu  = 'g/m3',
                 NOXu  = 'g/m3',
-                ph    = 'pH'    )
-
-# Constants
-latitude  <- 49.2827 # Vancouver's latitude
-longitude <- -123.1207 # Vancouver's longitude
-
-data_dir <- "C:/Data/Git/LSSM/Data"
-DEB_dir  <- "C:/Data/Git/LSSM/DEB"
-
+                ph    = 'pH')
 
 #==== Functions ====
 
@@ -91,10 +109,12 @@ Load2023MooringData <- function(){
 # Resolution and extents depend on the temperature data.
 # Currently dependent on BATI sensor measures processed by Barbosa.
 
-PrepSensorData <- function( moor_dat, smo, emo){
+
+#extract Temp and Salinty from specified BATI mooring. 
+PrepBATIMooringData <- function( moor_dat, sdate, edate){
   
-  # First pull hourly temp data for specified start/end months
-  m_idx <- month(moor_dat$date_time) >= smo & month(moor_dat$date_time) <= emo
+  # Create index for all hourly data between specified start/end months
+  m_idx <- moor_dat$date_time > sdate & moor_dat$date_time < edate
   ts_out <- data.frame( 
     cbind( "month" = month( moor_dat[ m_idx, "date_time" ]),
            "day"   = day( moor_dat[ m_idx, "date_time" ]),
@@ -113,6 +133,7 @@ PrepSensorData <- function( moor_dat, smo, emo){
   
   return(ts_out)
 }  
+
 
 
 #==== Simulating insolation ====
@@ -165,10 +186,12 @@ CalculatePhotons <- function(solar_angle) {
   # Approximate PAR as 45% of total solar irradiance
   I_PAR <- 0.45 * I
   
+  # Jan22: Don't think I need this conversion ... 
   # Convert to Photon Flux Density (mol photons/m²/s)
   # Using a conversion factor (4.57e-6 mol/W/s) based on average photon energy
-  photon_flux_density <- I_PAR * 4.57e-6 * 3600
-  return(photon_flux_density)
+  # photon_flux_density <- I_PAR * 4.57e-6 * 3600
+  
+  return( I_PAR )
 }
 
 

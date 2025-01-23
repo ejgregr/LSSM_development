@@ -20,6 +20,25 @@ set.seed(42)  # Setting seed for reproducibility
 setwd( "c:/Data/Git/LSSM")
 source( "LSSM_configuration.R" )
 
+
+#---- Mooring data preparation ----
+ctd_BATI <- Load2023MooringData()
+t_stn5 <- ctd_BATI[ ctd_BATI$site == "mooring5", ]
+t_stn6 <- ctd_BATI[ ctd_BATI$site == "mooring6", ]
+
+BATI5 <- PrepSensorData( t_stn5, start_date, end_date )
+BATI6 <- PrepSensorData( t_stn6, 5, 9 )
+
+
+head(BATI5)
+par(mfrow=c(2,1), mar=c(4,4,1,1) )
+plot( BATI5$temp, type='l', xlab="",  xaxt = "n", ylab="Temperature (C)" )
+plot( BATI5$salt, type='l', xlab="Cumulative hours", ylab="Salinity (psu)" )
+
+plot( BATI5$temp, type='l', xlab="",  xaxt = "n", ylab="Temperature (C)" )
+plot( BATI6$temp, type='l', xlab="",  xaxt = "n", ylab="Temperature (C)" )
+
+
 #==== Evolving high level code for main model ====
 
 #==== Initialization
@@ -65,46 +84,6 @@ source( "LSSM_configuration.R" )
 # Nutrients and DIC are simulated as constant with variability
 # Light is simulated as non-varying daily sinusoidal
 
-ctd_BATI <- Load2023MooringData()
-t_stn5 <- ctd_BATI[ ctd_BATI$site == "mooring5", ]
-t_stn6 <- ctd_BATI[ ctd_BATI$site == "mooring6", ]
-
-BATI5 <- PrepSensorData( t_stn5, 5, 9 )
-head(BATI5)
-par(mfrow=c(2,1), mar=c(4,4,1,1) )
-plot( BATI5$temp, type='l', xlab="",  xaxt = "n", ylab="Temperature (C)" )
-plot( BATI5$salt, type='l', xlab="Cumulative hours", ylab="Salinity (psu)") 
-#    axis( 1, at = seq(-2, 2, by = 0.5), labels = BATI5$month) )
-
-#==== Estimate light input for timeseries.
-
-# Time series is based on BATI data loaded above. 
-# First full day is May 4th. Last full day is Sep 30.
-start_date <- as.Date("2024-05-04", format = "%Y-%m-%d")
-#end_date   <- "2024-09-30"
-end_date   <- as.Date("2024-06-04", format = "%Y-%m-%d")
-
-# Generate timestamps for 24 hours
-
-ts_start <- as.POSIXct( paste0( start_date, " 00:00:00") )  # Start timeseries
-ts_end   <- as.POSIXct( paste0( end_date,   " 23:00:00") )  # End timeseries
-timestamps <- seq(from = ts_start, to = ts_end, by = "hour")
-
-light_data <- CalculatePhotons( 
-                  solar_elevation_angle( timestamps, latitude, longitude )
-                  )
-head(BATI5)
-
-# Restrict BATI data to the start and end dates ... 
-start_month_day <- month(start_date) * 100 + day(start_date)
-end_month_day   <- month(end_date) * 100 + day(end_date)
-
-subBATI <- BATI5[ (BATI5$month * 100 + BATI5$day) >= start_month_day & 
-                 (BATI5$month * 100 + BATI5$day) <= end_month_day, ]
-
-length(light_data)
-dim(subBATI)
-
 
 bdat <- subBATI
 # Complete the input data frame by adding light
@@ -120,7 +99,7 @@ grow_dat <- cbind(
 #            "light" <- rnorm(dim(BATI5)[[1]], mean = 282.15, sd = 3.54)
 # NOTE: light_data longer than BATI data by a few hundred. Maybe BATI missing a few days?
 #       just take what you need for now ... shouldn't be off by much. 
-            "light" <- light_data[1:x]
+            "light" <- light_PAR[1:x]
             )
 
 # Ceiling any negative nutrient or DIC values 
@@ -136,7 +115,11 @@ write.table(grow_dat, file = paste0(DEB_dir, "/env_conditions.txt"), sep = "  ",
 
 # Run the DEB model
 setwd( DEB_dir )
-system2( "rundeb_KELP.exe" )
+#system2( "rundeb_KELP_p2.exe" )
+output <- system2("rundeb_KELP_p2.exe", stdout = TRUE, stderr = TRUE)
+print(output)
+
+
 
 # This output filename is currently fixed in the MatLab script
 deb_output <- read.csv( paste0(DEB_dir, "/DEB_results.csv") )
