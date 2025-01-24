@@ -9,17 +9,16 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Model overview
+#Model components 
 This section describes the model components
 
-## Dynamic energy budget growth model
+##Dynamic energy budget growth model
 The Dynamic energy budget (DEB) developed by XXX was calibrated for nereocystis by Barbosa. 
 
 The dynamics of the DEB are represented by three state variables: 
   the structural mass = Mv (MolV), 
   the nitrogen reserve density, meN = MeN/Mv (molN molV-1), 
   and the carbon reserve density, meC = MeC/Mv (molC molV-1). MeC and MeN are the masses of the C and N reserves. 
-
 
 The DEB takes a table of [temperature, nutrients, dissolved inorganic carbon (DIC), and light] as an input:
 
@@ -132,9 +131,63 @@ The difference in these values would be the C used for maintenance, which is mos
 
 Next step is to figure out how to estimate change in DIC from the output data, along with a measure of total plant size. This would include using below-bulb stype diameter to estimate stipe mass, plus some number of fronds to multiply by the growth value. (These fronds will need to be shed at some rate ... see Canvin et al. 2024).
 
-ChatGPT says that a mature bull kelp (*Nereocystis luetkeana*) plant can have 30 - 50 blades, and that the stipe usually makes up around 20-40% of the total biomass, depending on age and growth stage, season, and environmental factors. 
 
-We can also assume that the growth of the entire plant follows the growth rate of a blade. 
+
+Can we assume that the growth of the entire plant follows the growth rate of a blade? Not exactly according to Pontier et al. 2024.
+
+# Data
+
+##Light
+The Daily Light Integral (DLI) is a measure of the total amount of photosynthetically active radiation (PAR) received over a day. We first calculate PAR in units of *(µmol photons m⁻² s⁻²)*. PER HOUR? This was developed with support from ChatGPT. The photoperiod is simulated hourly for a year to match the DEB. DLI is related to PAR as (PARavg X photoperiod / 1e6). So in our case, we just need to daily averages over 1e6 (things coverts micromoles to moles giving DLI in *(mol photons m⁻² day⁻¹*).
+
+Currently can't match Pontier's values without a fudge factor. Check PAR function first. 
+
+
+## Values from the literature
+
+### Plant growth
+From Weigel and Pfister (2021):
+Sampled at peak biomass (June to Sept)
+Avg blade length     = 142+/-8.5 cm
+Avg Dry mass         = 4.13+/-0.27 g
+Scaled C fixing rate = 2.35+/- kg C / m2.yr (NET primary production)
+  Accounts for proportion C lost as respiration (0.27+/-0.08) - from other studies
+  0.16 released as DOC
+
+total daylight hours (Apr-Sep) = 2617
+
+*Estimates of fixing rate of KELP FOREST based on:* 
+mean no. of plants per m2    = 7.66+/-0.86
+mean no. of blades per indiv = 41.5+/-2.95
+# Earlier density measurements are lower:  2.25 (Foreman 1984), 3.7 (Barns and Kalvass 1993), and 4.57
+# indiv per m2 (Stekoll et al. 2006)
+
+*Working from annual fixing rate to monthly ...*
+2.35+/- kg C / m2.yr / 7.66+/-0.86 plants / m2
+2.35/7.66 = 0.30 kg C / yr / plant 
+
+*Carbon to ww conversion ... for realism check.*
+dw   = 0.13 * ww (Nereo, from Bullen)
+kgC  = 0.25 kg dw
+
+This leads to and estimate of kgWW / yr / plant of 9.23 kg (0.30 / 0.25 / 0.13). Not unreasonable. This can then be scaled to daily or monthly growth, by disaggregating total annual daylight hours (Weigel and Pfister 2021). From this we could also back calculate: 
+kg C / frond / year --> kg C / frond / month. But not sure this is fruitful, as we need to link to drivers. 
+
+      # kg ww / mo / plant 
+      kgww_mo <- kgww_yr * month_light[4:9] / sum(month_light[4:9] )
+
+
+
+
+## Values from elsewhere
+
+ChatGPT says:
+- A mature bull kelp (*Nereocystis luetkeana*) plant can have 30 - 50 blades
+- The stipe usually makes up around 20-40% of the total biomass, depending on age and growth stage, season, and environmental factors. 
+- A new sporophyte is typically a few mm to cm in length, and a few to 10s of mg (dry weight).
+
+
+
 
 
 

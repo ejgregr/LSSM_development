@@ -6,11 +6,10 @@
 #
 # Notes:
 #  - 
-
 #================================== Load require packages =================================
 # check for any required packages that aren't installed and install them
 required.packages <- c( "ggplot2", "reshape2", "lubridate", "dplyr",
-                        "rmarkdown","knitr", "tinytex", "kableExtra",
+                        "rmarkdown","knitr", "tinytex", # "kableExtra", currently causing trouble.
                         "seacarb", "gsw", "truncnorm")
 
 # Other packages that might be useful. 
@@ -29,19 +28,31 @@ lapply(required.packages, require, character.only = TRUE)
 #lapply(required.packages, library, character.only = TRUE)
 version$version.string
 
-
 #==== Configuration ====
-
-latitude  <- 49.2827 # Vancouver's latitude
+latitude  <- 49.2827   # Vancouver's latitude
 longitude <- -123.1207 # Vancouver's longitude
+
+B_init      <- 0.025  # Initial mass of sporophyte (est. at 25 mg based on ChatGPT)
+B_max       <- 9.23   # Max biomass for an adult Nereo. Calculated from field results (Weigel and Pfister 2021)
+r_max       <- 0.065  # Maximum daily growth rate, assuming 6 month growth and mature plant is 9.23 kg 
 
 data_dir <- "C:/Data/Git/LSSM_development/Data"
 DEB_dir  <- "C:/Data/Git/LSSM_development/DEB"
 
 # Growth period
-start_date <- as.POSIXct("2023-05-02 00:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
-end_date   <- as.POSIXct("2023-09-30 00:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
-difftime(end_date, start_date, units = "days")
+# Dates set to match 2023 BATI mooring data
+start_date <- as.POSIXct("2023-05-03 16:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
+end_date   <- as.POSIXct("2023-09-29 23:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
+timestamps <- seq(from = start_date, to = end_date, by = "hour")
+
+# Create compatible x-axis labels
+day_stamps <- timestamps %>%
+  as.Date() %>%                                          # Convert timestamps to Date
+  unique() %>%                                           # Get unique dates
+  .[. >= as.Date(start_date) &  . <= as.Date(end_date)]  # Filter dates within the range
+length( day_stamps )
+
+#difftime(end_date, start_date, units = "days")
 
 # Growth parameters
 B_init      <- 0.025  # Initial mass of sporophyte (est. at 25 mg based on ChatGPT)
@@ -58,7 +69,6 @@ DLI_opt   <- 30        # mol/m2/day
 DLI_range <- 20        # mol/m2/day (+/-)
 
 #---- Anticipated parameters  ----
-
 moText <- c( "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 # Elemental stuff in moles, complex/diverse molecules in g. 
 ounits <- list( sizeu = 'ha',
@@ -71,7 +81,31 @@ ounits <- list( sizeu = 'ha',
                 NOXu  = 'g/m3',
                 ph    = 'pH')
 
+
+
 #==== Functions ====
+
+#---- Utility growth functions ----
+# Logistic growth, with option for temperature and light factors.
+logistic_growth <- function(B0, K, r, step, temp=1, lite=1) {
+  B_predicted <- K / (1 + ((K - B0) / B0) * exp(-r * step * temp * lite))
+  return(B_predicted)
+}
+
+# Calculate temperature effect on growth rate
+# Pontier shows growth rate relatively stable below 10C, declines to about 1/2 by 14C
+t_scale <- function(T) {
+  scaled <- ifelse(T <= 10, 1, 0.5 / (T / T_max * 0.7))
+  return( scaled )
+}
+
+# Light-dependent growth rate function
+# Pontier shows growth rate peaks ~30 DLI. Simplify their decline to be 1/2 on both sides  
+DLI_scale <- function(lite) {
+  #(0.75*((lite - DLI_opt)^.5) / (DLI_range^2))
+  1 - (((lite - DLI_opt) / DLI_range)^2) * 0.5
+}
+
 
 #==== Load and prep data ====
 Load2023MooringData <- function(){
@@ -134,9 +168,32 @@ PrepBATIMooringData <- function( moor_dat, sdate, edate){
   return(ts_out)
 }  
 
-
-
 #==== Simulating insolation ====
+
+# Simulate hourly light levels for timestamps (analytic period)
+# NOTE q_mult fudge factor
+PrepLightSim <- function( ts, lat, lon ){
+  
+  light_PAR <- CalculatePhotons( 
+    solar_elevation_angle( ts, lat, lon )
+  )
+  
+  # Aggregate hours to days
+  paste( "Working with", length(light_PAR) /24, "days of light data ...")
+  par_daily <- split(light_PAR, ceiling(seq_along(light_PAR) / 24))
+  
+  # initialize target ... 
+  DLI <- numeric(length(par_daily))
+  
+  # Calculate average PAR for each day
+  for (i in seq_along(par_daily)) {
+    ave_par <- mean(par_daily[[i]])
+    q_mult <- 1.75
+    DLI[i] <- (ave_par * q_mult * 3600 *24) / 1e6
+  }
+  return( DLI )
+}
+
 # Function to calculate the solar declination angle (in degrees) based on the day of the year
 solar_declination <- function(day_of_year) {
   23.44 * sin((360 / 365) * (day_of_year - 81) * pi / 180)
