@@ -63,7 +63,7 @@ Integration of results into the state variables for next steps:
   m_EN = m_EN + dmENdt * dt     The mass of the nitrogen reserve;
   m_EC = m_EC + dmECdt * dt;    The mass of the carbon reserve
   
-Molar weights (g/mol) are used for converting moles (the mass unit in the DEB) to grams. These are listed in Lavaud et al.'s Table 2. The values for carbon and nitrogen are higher than their atomic masses as they reflect the average molar mass for the compounds typically found in the reserve pool of organisms like kelp. Minerals and inorganics can also make up 15-25% of kelp's dry weight (DEB's typically estimate dry weight).
+Molar weights (g/mol) are used for converting moles (the mass unit in the DEB) to grams. These are listed in Lavaud et al.'s Table 2. The values for carbon and nitrogen reserves are higher than their atomic masses as they reflect the average molar mass for the compounds typically found in the reserve pool of kelps. Minerals and inorganics can also make up 15-25% of kelp's dry weight (DEB's typically estimate dry weight).
 Molar weight of structure wV      27.51
 Molar weight of N reserve wEN     17
 Molar weight of C reserve wEC     30
@@ -170,14 +170,24 @@ mean no. of blades per indiv = 41.5+/-2.95
 dw   = 0.13 * ww (Nereo, from Bullen)
 kgC  = 0.25 kg dw
 
-This leads to and estimate of kgWW / yr / plant of 9.23 kg (0.30 / 0.25 / 0.13). Not unreasonable. This can then be scaled to daily or monthly growth, by disaggregating total annual daylight hours (Weigel and Pfister 2021). From this we could also back calculate: 
+This leads to and estimate of kgWW / yr / plant of 9.23 kg (0.30 / 0.25 / 0.13). Not unreasonable. This can  be scaled to daily or monthly growth, by disaggregating total annual daylight hours (Weigel and Pfister 2021). From this we could also back calculate: 
 kg C / frond / year --> kg C / frond / month. But not sure this is fruitful, as we need to link to drivers. 
 
       # kg ww / mo / plant 
       kgww_mo <- kgww_yr * month_light[4:9] / sum(month_light[4:9] )
 
+*Alkalinity*
+Alkalinity has a strong relationship with salinity. BATI moorings have salinity, so can get TA from the following equation (Evans et al. 2015):
 
+  TA = 48.7709*S + 606.23 μmol kg-1 
+  
+The fit is tight (r2 = 0.94, root mean square error = 17.21 μmol kg-1), and was calculated using only salinity data < 33.6.
 
+*Environmental DIC*
+Sample data for model development taken from Alaska ferry data. Accessible here:
+https://catalogue.hakai.org/erddap/tabledap/HakaiColumbiaFerryResearch.html
+
+Between October 2017 and October 2019, underway surface water measurements were collected from the Alaska Marine Highway System M/V Columbia during 135 service route transits. The vessel sailed south from Ketchikan every Wednesday, arrived in Bellingham on Friday, returned to Ketchikan on Sunday. Measurements of temperature, salinity, dissolved oxygen content, and CO2 partial pressure were made every 2 mins on seawater drawn into the vessel from a ~2 m intake. The CO2 measurement scheme involved the analysis of four gas standards of known CO2 content (150 ppm, 349 ppm, 449 ppm, and 850 ppm; Praxair Distributions Inc), 12 analyses atmospheric CO2, and 240 seawater CO2 measurements in a 8.5 hour period. The atmospheric and seawater CO2 analyses were run in a sequence of 3 atmospheric measurements and 60 seawater measurements that was repeated 4 times between standardization. 
 
 ## Values from elsewhere
 
@@ -195,6 +205,12 @@ ChatGPT says:
 ```{r DEBOut, echo=FALSE, fig.pos='h', fig.cap="Output from the DEB model - BATI5", fig.align='center'}
 PlotAllDEBResults( deb_output )
 ```
+
+
+#References
+
+Evans et al. 2015. Tracking Ocean Acidification in an Alaskan Shellfish Hatchery, PLoS One, 10, e0130384,
+https://doi.org/10.1371/journal.pone.0130384.
 
 
 

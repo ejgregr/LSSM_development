@@ -14,6 +14,8 @@
 #
 # TO DO: 
 # - Fix day length so can remove kludge
+# - Fix the q_mult fudge factor in PrepLightSim() used to match
+#   calc'd DLI to reported by Pontier
 # - Daily DIC drawdown;
 # - Daily change in water parcel chemistry
 # - 
@@ -64,6 +66,7 @@ y <- x %>%
     salt = mean(salt, na.rm = TRUE)    # Mean of salt
   )
 t_daily <- y$temp
+s_daily <- y$salt
 
 length(day_stamps)
 length(t_daily)
@@ -83,12 +86,16 @@ plot( day_stamps[-length(day_stamps)], light_DLI, type='l' )
 
 #----- Grow a kelp plant during PRIMARY growing season (MAY to SEPT) -----
 
-# Part 1 - Using simple logistic growth
+#----- Part 1 - Using simple logistic growth -----
 # logistic growth function has optional temperature and light inhibition factors
 
 # Calculate temperature and light variability (inhibition factors)
 temp_fact <- t_scale( t_daily )
 DLI_fact  <- DLI_scale( light_DLI )
+
+# Show the inhibition factors 
+plot( temp_fact, type = 'l' )
+plot( DLI_fact, type = 'l' )
 
 
 # Straight up logistic growth, no inhibition factors
@@ -107,59 +114,31 @@ for (t in 1:length( temp_fact ) ) {
 }
 log_env <- y
 
-# Comparision of simple vs. inhibited plant growth
+# Comparison of simple vs. inhibited plant growth
 par(mfcol=c(1,2))
 plot( day_stamps[-length(day_stamps)],log_simp*1000, type='l',xlab = 'Days', ylab = 'grams', main='A plant - simple logistic growth')
-plot( day_stamps[-length(day_stamps)], log_env*1000, type='l',xlab = 'Days', ylab = 'grams', main='A Plant - inhibited logistic growth')
+plot( day_stamps[-length(day_stamps)], log_env*1000, type='l',xlab = 'Days', ylab = 'grams', main='A plant - inhibited logistic growth')
+
+
+#----- Part 2 - Chemistry of the plant growth model -----
+# NOTE seacarb() requires everything in mol/kg
+# Starting with daily plant biomass, get daily grams DIC fixed.   
+gDIC_fixed <- log_env * 1000 * wet_to_dry * dry_to_C  
+
+# Using mol weights (g/mol) of structure and C reserve from DEB, estimate daily mols C
+# Mol wt of structure = 27.51; mol wt of C reserve = 30. Use average
+
+molDIC_fixed <- gDIC_fixed / (27.51+30) / 2
+
+# Get alkalinity for BATI time series
+# Using equation from Evans et al. 2015:  TA = 48.7709*S + 606.23 (μmol kg-1) 
+
+TA_daily <- (48.7709*s_daily + 606.23) # μmol kg-1 
+TA_daily <- TA_daily / 1000 # mol kg-1
 
 
 
-
-
-
-#Grow!
-y <- NULL
-for (t in 1:length(temp_fact) ) {
-  one <- logistic_growth( B_init, B_max, r_max*temp_fact[t], t)
-  #  one <- logistic_growth( B_init, B_max, t, r_max*temp_fact)
-  y <- c(y, one)
-}
-log_t <- y
-
-y <- NULL
-for (t in 1:length(temp_fact) ) {
-  one <- logistic_growth( B_init, B_max, r_max*DLI_fact[t], t)
-  #  one <- logistic_growth( B_init, B_max, t, r_max*temp_fact)
-  y <- c(y, one)
-}
-log_DLI <- y
-
-y <- NULL
-for (t in 1:length(temp_fact) ) {
-  one <- logistic_growth( B_init, B_max, r_max*DLI_fact[t]*temp_fact[t], t)
-  #  one <- logistic_growth( B_init, B_max, t, r_max*temp_fact)
-  y <- c(y, one)
-}
-log_env <- y
-
-#----- Plot results -----
-dev.off()
-par(mfcol=c(4,2))
-
-xvals <- timestamps
-
-plot(1, 1, type = "n", axes = FALSE, xlab = "", ylab = "", main = "")
-plot( temp_fact, type = 'l' )
-plot( DLI_fact, type = 'l' )
-plot(1, 1, type = "n", axes = FALSE, xlab = "", ylab = "", main = "")
-
-
-plot(log_simp*1000, type='l',xlab = 'Days', ylab = 'grams', main='A Plant')
-plot(log_t*1000,    type='l',xlab = 'Days', ylab = 'grams', main='A Plant with Temp')
-plot(log_DLI*1000,  type='l',xlab = 'Days', ylab = 'grams', main='A Plant with Light')
-plot(log_env*1000,  type='l',xlab = 'Days', ylab = 'grams', main='A Plant with both')
-
-
+carb( )
 
 
 #---- Knit and render Markdown file to PDF -----

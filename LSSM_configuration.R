@@ -108,6 +108,28 @@ DLI_scale <- function(lite) {
 
 
 #==== Load and prep data ====
+
+# Interpolate missing daily values for ambient seawater pCO2 values
+#   Interpolated values are the mean of the last 3, next valid values. 
+interpolateC02NAs <- function(series) {
+  for (i in seq_along(series)) {
+    if (is.na(series[i])) {
+      # Get the three previous valid values
+      prev_values <- tail(series[1:(i-1)][!is.na(series[1:(i-1)])], 3)
+      
+      # Get the next valid value
+      next_value <- head(series[(i+1):length(series)][!is.na(series[(i+1):length(series)])], 1)
+      
+      # Compute the average if we have enough valid values
+      if (length(prev_values) == 3 && length(next_value) == 1) {
+        series[i] <- mean(c(prev_values, next_value), na.rm = TRUE)
+      }
+    }
+  }
+  return(series)
+}
+
+
 Load2023MooringData <- function(){
   ctd<- read.csv(paste(data_dir, "ctd_surface_cond_moorings2023.csv", sep="/"))
   
