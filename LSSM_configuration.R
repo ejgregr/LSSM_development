@@ -8,7 +8,7 @@
 #  - 
 #================================== Load require packages =================================
 # check for any required packages that aren't installed and install them
-required.packages <- c( "ggplot2", "reshape2", "lubridate", "dplyr",
+required.packages <- c( "ggplot2", "reshape2", "lubridate", "dplyr", "stringr",
                         "rmarkdown","knitr", "tinytex", # "kableExtra", currently causing trouble.
                         "seacarb", "gsw", "truncnorm")
 
@@ -43,14 +43,15 @@ DEB_dir  <- "C:/Data/Git/LSSM_development/DEB"
 # Dates set to match 2023 BATI mooring data
 start_date <- as.POSIXct("2023-05-03 16:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
 end_date   <- as.POSIXct("2023-09-29 23:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
-timestamps <- seq(from = start_date, to = end_date, by = "hour")
+hour_stamps <- seq(from = start_date, to = end_date, by = "hour")
 
 # Create compatible x-axis labels
-day_stamps <- timestamps %>%
+day_stamps <- hour_stamps %>%
   as.Date() %>%                                          # Convert timestamps to Date
   unique() %>%                                           # Get unique dates
   .[. >= as.Date(start_date) &  . <= as.Date(end_date)]  # Filter dates within the range
-length( day_stamps )
+day_stamps <- as.Date( day_stamps )
+day_stamps <- day_stamps[-length(day_stamps)] # KLUDGE!!
 
 #difftime(end_date, start_date, units = "days")
 
@@ -109,6 +110,54 @@ DLI_scale <- function(lite) {
 
 #==== Load and prep data ====
 
+# Uses hard-coded name for source text file. 
+# Assumes seawater CO2 measurements are what we want. 
+# Summarizes several years of data into a 'climatology', and interpolates missing days.
+LoadAkFerryCO2Data <- function(){
+  x<- read.csv(paste(data_dir, "HakaiColumbiaFerryResearch.txt", sep="/"))
+  
+  # Muck about with the date to 1) standardize on 6 digits, 2) replace year.
+  a  <- ifelse(nchar(x$s.PC_Date) < 6, paste0("0", x$s.PC_Date), x$s.PC_Date)
+  aa <- as.Date( a, format = "%d%m%y" )
+  
+  # Pull the data we want: this is in ppm units. 
+  b <- x$s.calibrated_SW_xCO2_dry
+  
+  # Build a dataframe
+  #foo       <- data.frame( "date" = aa, "SW_CO2" = b)
+  #CO2_daily <- data.frame( "month"=month(foo$date), "day"=day(foo$date), "CO2"=foo$SW_CO2  )
+  CO2_daily <- data.frame("month"=month(aa), "day"=day(aa), "CO2"=b )
+  
+  # Get the daily mean for available dates from Oct 2017 to Oct 2019
+  CO2_daily <- CO2_daily %>%
+    group_by(month, day) %>%
+    summarise(
+      CO2mn = mean(CO2, na.rm = TRUE),   # Mean of SW CO2
+    )
+  
+  aa <- as.Date(paste("2023", CO2_daily$month, CO2_daily$day, sep='-'), format = "%Y-%m-%d")
+  CO2_daily$date <- aa
+  
+  return(CO2_daily)
+}
+
+# Take the daily AK data make it match the BATI mooring days (i.e., extrapolate)
+PrepAKFerryCO2Data <- function(dCO2, all_days){
+  
+  # Start with some dates on the CO2 data. Needs a faux year
+  # full_dates <- as.Date(paste("2023", dCO2$month, dCO2$day, sep='-'), format = "%Y-%m-%d")
+  # Expand the frame to include all the days in all_days
+  expanded_data <- data.frame(
+    Date = all_days,
+    #    dCO2 = ifelse(all_days %in% full_dates, dCO2$CO2mn[match(all_days, full_dates)], NA)
+    dCO2 = ifelse(all_days %in% dCO2$date, dCO2$CO2mn[match(all_days, dCO2$date)], NA)
+  )
+  
+  # Interpolate the NAs created above
+  expanded_data$dCO2 <- interpolateC02NAs(expanded_data$dCO2)
+  return(expanded_data)
+}
+
 # Interpolate missing daily values for ambient seawater pCO2 values
 #   Interpolated values are the mean of the last 3, next valid values. 
 interpolateC02NAs <- function(series) {
@@ -123,6 +172,8 @@ interpolateC02NAs <- function(series) {
       # Compute the average if we have enough valid values
       if (length(prev_values) == 3 && length(next_value) == 1) {
         series[i] <- mean(c(prev_values, next_value), na.rm = TRUE)
+      } else {
+        series[i] <- mean(c(prev_values), na.rm = TRUE)
       }
     }
   }
@@ -161,12 +212,7 @@ Load2023MooringData <- function(){
   return(ctd)
 }
 
-# Create a DF that can be passed to the growth model.
-# Resolution and extents depend on the temperature data.
-# Currently dependent on BATI sensor measures processed by Barbosa.
-
-
-#extract Temp and Salinty from specified BATI mooring. 
+#Extract Temp and Salinty from specified BATI mooring. 
 PrepBATIMooringData <- function( moor_dat, sdate, edate){
   
   # Create index for all hourly data between specified start/end months
@@ -190,19 +236,37 @@ PrepBATIMooringData <- function( moor_dat, sdate, edate){
   return(ts_out)
 }  
 
+#Summarise mooring data to daily for parameter-based model
+MooringtoDays <- function( hrly_moor ){
+  day_dat <- hrly_moor %>%
+    group_by(month, day) %>%
+    summarise(
+      temp = mean(temp, na.rm = TRUE),   # Mean of temp
+      salt = mean(salt, na.rm = TRUE)    # Mean of salt
+    )
+  day_dat$date <-as.Date(paste("2023", day_dat$month, day_dat$day, sep='-'), format = "%Y-%m-%d")
+  return(day_dat)
+}
+
+
 #==== Simulating insolation ====
 
 # Simulate hourly light levels for timestamps (analytic period)
 # NOTE q_mult fudge factor
-PrepLightSim <- function( ts, lat, lon ){
+HourlyLightSim <- function( ts, lat, lon ){
   
   light_PAR <- CalculatePhotons( 
     solar_elevation_angle( ts, lat, lon )
   )
+  return(light_PAR)
+}
   
-  # Aggregate hours to days
-  paste( "Working with", length(light_PAR) /24, "days of light data ...")
-  par_daily <- split(light_PAR, ceiling(seq_along(light_PAR) / 24))
+# Aggregate hours to days. 
+# NOT ideal as this does not use actual DATE/time so a bit offset.
+DailyLight <- function( days, hr_PAR ){
+  # Currently not using days, but should. :\
+  paste( "Working with", length( hr_PAR) /24, "days of light data ...")
+  par_daily <- split(hr_PAR, ceiling(seq_along(hr_PAR) / 24))
   
   # initialize target ... 
   DLI <- numeric(length(par_daily))

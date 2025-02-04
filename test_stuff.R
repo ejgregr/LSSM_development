@@ -1,3 +1,8 @@
+
+
+
+#---- OLDER Stuff ... 
+
 # Data structure will track a plant over 12 months. 
 # All other results will be scaled to/from this. 
 
