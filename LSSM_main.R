@@ -61,6 +61,7 @@ plot( x, BATI6$salt, type='l', main= "BATI Mooring 6", xlab="", ylab="Salinity (
 
 # Calculate and show Daily mooring data ... needed for parametric model.
 day_BATI5 <- MooringtoDays(BATI5)
+day_BATI6 <- MooringtoDays(BATI6)
 x <- day_stamps
 plot( x, day_BATI5$temp, type='l', main= "Daily Temperature (BATI 5)", xlab="", ylab="(C)" )
 plot( x, day_BATI5$salt, type='l', main= "Daily Salinity (BATI 5)", xlab="", ylab="(psu)" )
@@ -89,23 +90,21 @@ plot( day_stamps, daily_DLI, type='l', main= "Daily Light Intensity (simulated)"
 #---- Part 1c) Get alkalinity using BATI Salt time series ----
 # Using equation from Evans et al. 2015:  TA = 48.7709*S + 606.23 (μmol kg-1) 
 
-daily_TA <- (48.7709 * day_BATI5$salt + 606.23) # μmol kg-1 
-daily_TA <- daily_TA / 1000 # mol kg-1
+rm(daily_TA)
+daily_TA <- data.frame( "B5" = CalcAlk( day_BATI5$salt ),
+                        "B6" = CalcAlk( day_BATI6$salt ))
 
-plot( day_stamps, daily_TA, type='l', main= "Average, Daily Total Alkalinity", 
+plot( day_stamps, daily_TA$B5, type='l', main= "Average, Daily Total Alkalinity (BATI5)", 
       xlab="", ylab="mol / kg" )
 
 # Empty plot to fill the space 
 plot(1, 1, type = "n", xlab = "", ylab = "", axes = FALSE, main = "Empty Plot")
 
-
-#---- Part 1d) Estimate ambient pCO2 from Ak Ferry data ---- 
+#----- Part 1d) Estimate ambient pCO2 from Ak Ferry data ---- 
 # Not strictly related to kelp growth, but necessary to estimate pH effect
 
 ak_dat      <- LoadAkFerryCO2Data()
 daily_swCO2 <- PrepAKFerryCO2Data(ak_dat, day_stamps)
-# convert ppm to uatm (microatmospheres) at std atm pressure for carb()
-daily_swCO2 <- daily_swCO2 * 1.01325 
 
 # Show the Ak ferry data, before and after interpolation  
 plot(ak_dat$date, ak_dat$CO2mn, type = "o", main = "Ak Ferry daily Seawater pCO2 climatology",
@@ -128,7 +127,6 @@ DLI_fact  <- DLI_scale( daily_DLI )
 # Show the inhibition factors 
 plot( temp_fact, type = 'l' )
 plot( DLI_fact, type = 'l' )
-
 
 # Straight up logistic growth, no inhibition factors
 y <- NULL
@@ -155,67 +153,87 @@ plot( day_stamps, log_env*1000, type='l',xlab = 'Days', ylab = 'grams', main='A 
 # exactly the same with growth. Needs a think. 
 
 # --> Work with un-inhibited growth for now.
+# Daily growth in kg. 
+kelp_grow <- log_simp
 
 #----- Part 3 - Chemistry of the plant growth model -----
-# NOTE seacarb() requires everything in mol/kg, and uses flags to identify the 
-# two inputs from which to calculate carbonate chemistry. Of interest here:
+# NOTE carb() requires vars in mol/kg, except pCO2 in uatm (micro atmospheres)
+#   ALL conversions done above so oceanographic descriptors are carb() friendly.
+# carb() uses flags to ID inputs. Of interest here:
 
-flag_CA <- 4  # CO2 and Alkalinity 
-flag_CD <- 25 # CO2 and DIC  
+flag_CA <- 24 # pCO2 and Alkalinity 
+flag_CD <- 25 # pCO2 and DIC  
 flag_AD <- 15 # Alkalinity and DIC 
 
-# MOLES OF DIC FIXED BY KELP ... 
+#----- Part 3a) Moles of DIC fixed by kelp ... 
 # Starting with the daily kelp biomass, get daily grams DIC fixed.   
-gDIC_fixed <- log_simp * 1000 * wet_to_dry * dry_to_C  
+gDIC_fixed <- kelp_grow * 1000 * wet_to_dry * dry_to_C  
 
 #Using mol weights (g/mol) of structure and C reserve from DEB, estimate daily mols C
 #Mol wt of structure = 27.51; mol wt of C reserve = 30. Use average
-
 molDIC_fixed <- gDIC_fixed / (27.51+30) / 2
 
 #Now the cumulative DIC fixed over 150 days (is the same shape as growth)
 plot( day_stamps, molDIC_fixed )
 
 #Use diff() to return difference btwn consecutive elements. So now its DIC fixed/day
-delkDIC <- diff( molDIC_fixed ) 
-plot( day_stamps[-length(day_stamps)], delkDIC, ylab = "mol DIC fixed / day" )
 #This is equivalent to the rate of kelp growth. 
+delkDIC <- diff( molDIC_fixed ) 
+#NOTE: Length is now day_stamps-1
+plot( day_stamps[-length(day_stamps)], delkDIC, ylab = "mol DIC fixed / day" )
 
+#----- Part 3b) Ambient DIC and baseline pH
 # AMBIENT DIC  ...
-# Illustrate with 3 plots
-par(mfrow=c(3,1) )
+# All ocean drivers should be in carb() units and day length:
+# 
+daily_ocean <- data.frame( 'days' = day_stamps,
+                           'temp' = day_BATI5$temp, 
+                           'salt' = day_BATI5$salt,
+                           'pCO2' = daily_swCO2$dCO2,
+                           'totA' = daily_TA$B5 )
+ dim(daily_ocean)
+ mean(daily_ocean$salt)
+ 
+ #----- Convert ambient pCO2 to DIC using pCO2 and totA. -----
+ baseline <- carb( flag_CA, var1=daily_ocean$pCO2, var2=daily_ocean$totA,
+                 S=daily_ocean$salt, T=daily_ocean$temp )
 
-# Convert  ambient pCO2 to DIC ... Needs Alkalinity!
+ #Ambient DIC in 3 plots
+par(mfrow=c(4,1))
 par(mar=c(0,4,3,1) )
-plot( daily_TA, type='l', xlab='', xaxt = "n", main="Ambient pCO2 to DIC" )
+plot( daily_ocean$totA, type='l', xlab='', ylab='Alkalinity (mol/kg)', xaxt = "n", main="Ambient pCO2 to DIC" )
 par(mar=c(0,4,1,1) )
-plot( daily_swCO2, type='l', xlab='',xaxt = "n" )
-# Note the dropping of the date column, and the need to drop 2 dates
-x <- daily_swCO2[-dim(daily_swCO2)[[1]],2 ]
-x <- x[-length(x)]
-y <- daily_TA[-length( daily_TA )]
-
-# carb() wants pCO2 in uatm. Ferry data is in 
-
-amb_DIC <- carb( flag_CA, x, y )$DIC
-par(mar=c(3,4,1,1) )
-plot( day_stamps[-length(day_stamps)], amb_DIC, type='l', xlab='' )
-
-# We can look at daily changes in pH from ambient attributable to kelp. 
-# This effect is proportional to the size of the plant and its rate of growth. 
-# (I don't think this is all captured with the logistic growth model)
-length(amb_ph)
-amb_ph  <- carb( flag_AD, y, amb_DIC )$pH
-kmod_ph <- carb( flag_AD, y, amb_DIC-delkDIC )$pH
-plot( day_stamps[-length(day_stamps)], xlab="",
-      amb_ph, type='l', col='red', main='Daily change in pH in 1 m2 of water')
-lines( day_stamps[-length(day_stamps)],
-       kmod_ph, type='l', col='green' )
-legend("bottomleft", legend = c("Ambient", "Kelp-affected"), col = c("red", "green"), lwd = 2)
+plot( daily_ocean$pCO2, type='l', xlab='', ylab='pCO2 (uatm)', xaxt = "n" )
+par(mar=c(0,4,1,1) )
+plot( x=daily_ocean$days, y=baseline$DIC, type='l', xlab='', ylab='DIC (mol/kg)', xaxt = "n" )
+par(mar=c(3,4,1,1) ) 
+plot( x=daily_ocean$days, y=baseline$pH, type='l', xlab='', ylab='pH')
 
 
+#----- some checks on DIC and pH inside and out  -----
+# Compare carb() results for DIC from pCO2 for B5 (QCS) and B6 (KI). 
+x1 <- carb( flag_CA, var1=daily_ocean$pCO2, var2=daily_TA$B5, S=day_BATI5$salt, T=day_BATI5$temp )
+x2 <- carb( flag_CA, var1=daily_ocean$pCO2, var2=daily_TA$B6, S=day_BATI6$salt, T=day_BATI6$temp )
+
+# First, DIC at B5 vs B6 little different. So appears pCO2 is a main driver of DIC,
+# regardless of Alkalinity. pCO2, Temp, and Salt constant
+par(mfrow=c(3,2))
+par(mar=c(0,4,3,1) )
+plot(daily_TA$B5, type='l', xaxt = "n", main="pCO2 to pH - B5")
+plot(daily_TA$B6, type='l', ylab="", xaxt = "n", main="pCO2 to pH - B6")
+
+par(mar=c(0,4,1,1) )
+plot(x1$DIC, type='l', xaxt = "n")
+plot(x2$DIC, type='l', xaxt = "n", ylab="")
+
+# Second, resulting pH seems really low, and why lower in KI?
+par(mar=c(3,4,1,1) ) 
+plot( day_stamps, x1$pH, type='l' )
+plot( day_stamps, x2$pH, type='l', ylab="" )
 
 
+
+#---- Thinking about volume effects ----
 # Above is all based on 1 kg of water. 
 # At what mass/volume is the reduction in DIC not significant?
 
@@ -223,19 +241,13 @@ legend("bottomleft", legend = c("Ambient", "Kelp-affected"), col = c("red", "gre
 # Example usage:
 DIC_removed <- 156.1458  # Total DIC removed by kelp (moles)
 DIC_ambient <- 2.572458  # Mean ambient DIC (moles/kg)
-dilution_mass(DIC_removed, DIC_ambient, epsilon = 0.05)  # 5% threshold
+x <- dilution_mass(DIC_removed, DIC_ambient, epsilon = 0.01)  # 1% threshold
 
 
 
+DIC_ambient - (DIC_removed/x)
 
 
-
-
-x <- seq(10, round( dilution_mass( sum(molDIC_fixed), mean(amb_DIC), 0.01 )), by=100)
-yK <- DIC_removed / x
-yA <- 
-z <- mean( daily_TA)
-csystem <- carb( flag_AD, z, y )
 
 
 # Function to estimate the 
@@ -250,6 +262,40 @@ dilution_mass <- function(DIC_removed, DIC_ambient, epsilon = 0.01) {
   return(M)
 }
 
+
+
+
+
+
+
+
+DIC_removed   <- sum( molDIC_fixed )
+max( baseline$DIC )
+
+
+
+
+
+# We can look at daily changes in pH from ambient attributable to kelp. 
+# This effect is proportional to the size of the plant and its rate of growth. 
+# (I don't think this is all captured with the logistic growth model)
+
+amb_ph  <- carb( flag_AD, y, amb_DIC )$pH
+kmod_ph <- carb( flag_AD, y, amb_DIC-delkDIC )$pH
+
+
+plot( day_stamps[-length(day_stamps)], xlab="",
+      amb_ph, type='l', col='red', main='Daily change in pH in 1 m2 of water')
+lines( day_stamps[-length(day_stamps)],
+       kmod_ph, type='l', col='green' )
+legend("bottomleft", legend = c("Ambient", "Kelp-affected"), col = c("red", "green"), lwd = 2)
+
+
+### NOTES:
+# Buffering Capacity: The ratio of TA to DIC determines the buffering of pH changes. 
+#   High TA regions will show smaller pH shifts.
+# Seasonality: Your May–September timeline aligns with peak kelp growth but 
+#   also with upwelling events that introduce new DIC-rich waters.
 
 
 #---- Knit and render Markdown file to PDF -----

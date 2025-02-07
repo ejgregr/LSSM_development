@@ -112,6 +112,7 @@ DLI_scale <- function(lite) {
 
 # Uses hard-coded name for source text file. 
 # Assumes seawater CO2 measurements are what we want. 
+# sw CO2 measured in ppm which is euqivalent to uatm requred by carb().
 # Summarizes several years of data into a 'climatology', and interpolates missing days.
 LoadAkFerryCO2Data <- function(){
   x<- read.csv(paste(data_dir, "HakaiColumbiaFerryResearch.txt", sep="/"))
@@ -180,7 +181,6 @@ interpolateC02NAs <- function(series) {
   return(series)
 }
 
-
 Load2023MooringData <- function(){
   ctd<- read.csv(paste(data_dir, "ctd_surface_cond_moorings2023.csv", sep="/"))
   
@@ -212,7 +212,7 @@ Load2023MooringData <- function(){
   return(ctd)
 }
 
-#Extract Temp and Salinty from specified BATI mooring. 
+# Extract Temp and Salinty from specified BATI mooring. 
 PrepBATIMooringData <- function( moor_dat, sdate, edate){
   
   # Create index for all hourly data between specified start/end months
@@ -236,7 +236,7 @@ PrepBATIMooringData <- function( moor_dat, sdate, edate){
   return(ts_out)
 }  
 
-#Summarise mooring data to daily for parameter-based model
+# Summarise mooring data to daily for parameter-based model
 MooringtoDays <- function( hrly_moor ){
   day_dat <- hrly_moor %>%
     group_by(month, day) %>%
@@ -248,6 +248,12 @@ MooringtoDays <- function( hrly_moor ){
   return(day_dat)
 }
 
+# Calculate total alkalinity from salinity
+CalcAlk <- function( salt ) {
+  TA <- (48.7709 * salt + 606.23) # μmol kg-1 
+  TA <- TA / 1000 # mol kg-1
+  return( TA )  
+}
 
 #==== Simulating insolation ====
 

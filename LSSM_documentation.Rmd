@@ -29,9 +29,11 @@ Light data from the Hobos are challenging because the sensors foul up and need c
 MAPP also has 5 moorings in the area. Of interest may be M5 (in QCS) and M4 (at the entrance to Knight Inlet). The MAPP moorings include a StarOddi only, collecting T/S at surface (~ 1m). These data have not yet been processed.
 
 ##Alkalinity
-Alkalinity is needed to calculate pH. Fortuantely, it has a strong relationship with salinity. BATI moorings have salinity, so can get TA from the following equation (Evans et al. 2015):
+Alkalinity is needed to calculate pH. Fortunately, it has a strong relationship with salinity. BATI moorings have salinity, so can get TA from salinity relationship. THis has been derived by Evans for various locations in the eastern Pacific. For example:
 
-  TA = 48.7709*S + 606.23 μmol kg-1 
+  TA = 48.771 * S + 606.23 μmol kg-1 (Evans et al. 2015, for SE Ak)
+  TA = 59.88  * S + 278.79 μmol kg-1 (Evans et al. 2019, for the Northern Salish Sea)
+  
   
 The fit is tight (r2 = 0.94, root mean square error = 17.21 μmol kg-1), and was calculated using only salinity data < 33.6.
 
@@ -46,7 +48,6 @@ https://catalogue.hakai.org/erddap/tabledap/HakaiColumbiaFerryResearch.html
 
 Between October 2017 and October 2019, underway surface water measurements were collected from the Alaska Marine Highway System M/V Columbia during 135 service route transits. The vessel sailed south from Ketchikan every Wednesday, arrived in Bellingham on Friday, returned to Ketchikan on Sunday. Measurements of temperature, salinity, dissolved oxygen content, and CO2 partial pressure were made every 2 mins on seawater drawn into the vessel from a ~2 m intake. The CO2 measurement scheme involved the analysis of four gas standards of known CO2 content (150 ppm, 349 ppm, 449 ppm, and 850 ppm; Praxair Distributions Inc), 12 analyses atmospheric CO2, and 240 seawater CO2 measurements in a 8.5 hour period. The atmospheric and seawater CO2 analyses were run in a sequence of 3 atmospheric measurements and 60 seawater measurements that was repeated 4 times between standardization. 
 Of interest here is seawater pCO2, and this is measured in 
-
 
 
 #Kelp growth
@@ -119,7 +120,7 @@ Allocation to growth:
   j_G    = gross specific growth rate
 
 Total weight and length are closely correlated, as length is a species-specific function of biomass.
-  Wt        = g
+  Wt       = g
   L_allomt = cm, physical length
 
 Integration of results into the state variables for next steps: 
@@ -136,6 +137,13 @@ Molar weights (g/mol) are used for converting moles (the mass unit in the DEB) t
 A critical aspect of estimating the change in pH attributable to kelp.
 With the data described above, we used seacarb() to estimate the change in pH attributable to kelp.
 
+Some general estimates in NEP coastal waters for sanity checking (from ChatGPT):
+Typical Alkalinity : 1800 - 2300 umol/kg  More in upwelled waters.
+  varies due to freshwater input, biological processes, and upwelling.
+Typical DIC        : 2000 - 2500 µmol/kg. Upwelled waters at high end.
+Typical pCO2       : 300 - 450 utm.       >1000 in upwelled waters.
+  this is near equilibrium w atm.
+Typical pH         : 7.6 to 8.2           Depends on upwelling, biol activity
 
 
 ### Other BATI ocean data
