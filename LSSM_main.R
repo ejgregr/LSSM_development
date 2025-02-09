@@ -265,12 +265,8 @@ dilution_mass <- function(DIC_removed, DIC_ambient, epsilon = 0.01) {
 
 
 
-
-
-
-
 DIC_removed   <- sum( molDIC_fixed )
-max( baseline$DIC )
+mean( baseline$DIC )
 
 
 
@@ -296,6 +292,107 @@ legend("bottomleft", legend = c("Ambient", "Kelp-affected"), col = c("red", "gre
 #   High TA regions will show smaller pH shifts.
 # Seasonality: Your May–September timeline aligns with peak kelp growth but 
 #   also with upwelling events that introduce new DIC-rich waters.
+
+
+# carb function returning different results for the same inputs?? ------------------------------------------------------
+
+# take a look at the x1 object calculated above using carb
+head(x1)
+
+# if we run carb with the values from x1, I would expect to get the same values back
+test <- carb(flag_AD, x1$ALK, x1$DIC)
+
+# but we don't!?!
+# Maybe it has something to do with the different flag and inputs used to calculate x1 above?
+bind_cols("test" = test$pH, "original" =  x1$pH)
+
+
+
+# Calculate effect of kelp growth at different volumes -----------------------------------------------------------------
+
+# Volumes in litres / kg of water to iterate over
+volumes <- c(50, 100, 500, 1000, 5000, 10000, 100000, 1000000)
+
+# This is the moles of DIC fixed per day by the kelp growth
+molDIC_fixed
+
+# This is the 'ambient' conditions that we will use - x1 = BATI5, x2 = BATI6
+# As flagged above, we can't just use these outputs, we need to re-run carb in order for the results to be comparable
+ambient_data <- carb(flag_AD, x1$ALK, x1$DIC)
+
+# Create a list to store the outputs
+adjusted_chem <- list()
+
+
+
+# iterate over each volume
+for(i in 1:length(volumes)) {
+  
+  # calculate DIC fixed per litre
+  molDIC_fixed_per_kg <- molDIC_fixed / volumes[i]
+  
+  # Calculate carbonate chemisty - using Alkalinity and DIC, with DIC adjusted based on kelp carbon fixation
+  chem_out <- carb(flag_AD, ambient_data$ALK, ambient_data$DIC - molDIC_fixed_per_kg)
+  
+  # label with the volume
+  chem_out$Volume_kg <- volumes[i]
+  
+  # Calculate delta pH, the difference from ambient
+  chem_out$delta_pH <-  chem_out$pH - ambient_data$pH
+  
+  # save output as list element
+  adjusted_chem[[i]] <- chem_out
+  
+}
+
+# combine the results in a single dataframe, add a day of year column too
+adjusted_chem <- lapply(adjusted_chem, function(x) x %>% mutate(DoY = c(1:nrow(x))))
+
+adjusted_chem <- bind_rows(adjusted_chem)
+
+# Make volume a factor
+adjusted_chem$Volume_kg <- factor(adjusted_chem$Volume_kg)
+
+# Surface plots --------------------------------------------------------------------------------------------------------
+
+# pH over time, by volume
+ggplot(adjusted_chem) +
+  geom_line(aes(x = DoY, y = pH, colour = Volume_kg))
+
+# Difference from Ambient
+ggplot(adjusted_chem) +
+  geom_line(aes(x = DoY, y = delta_pH, colour = Volume_kg))
+
+
+ggplot(adjusted_chem) +
+  geom_point(aes(x = DIC, y = pH, colour = ALK)) +
+  facet_wrap(~Volume_kg)
+
+
+library(plotly) # for 3D plots
+
+glimpse(x1)
+
+pairs(x1 %>% select(S, `T`, pH, pCO2, DIC, ALK), main = "Pairwise plot of daily chemistry parameters (x1; BATI5).")
+pairs(x2 %>% select(S, `T`, pH, pCO2, DIC, ALK), main = "Pairwise plot of daily chemistry parameters (x2; BATI6).")
+
+
+p <- plot_ly(data = adjusted_chem %>%
+               mutate(Volume_kg = as.numeric(as.character(Volume_kg))),
+             x = ~log10(Volume_kg), y = ~DIC, z = ~`pH`, color = ~`pH`, type = "scatter3d") %>%
+  layout(title = "Volume adjusted chemistry with kelp growth")
+
+p
+
+htmlwidgets::saveWidget(p, file = "pH_DIC_by_volume.html")
+
+
+# surface plot requires a matrix with evenly spaced values. example below
+m = matrix(rnorm(25),nrow = 5, ncol = 12)
+
+plot_ly(z = ~m) %>% 
+  add_surface()
+
 
 
 #---- Knit and render Markdown file to PDF -----
