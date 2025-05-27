@@ -51,7 +51,7 @@ day_stamps <- hour_stamps %>%
   unique() %>%                                           # Get unique dates
   .[. >= as.Date(start_date) &  . <= as.Date(end_date)]  # Filter dates within the range
 day_stamps <- as.Date( day_stamps )
-day_stamps <- day_stamps[-length(day_stamps)] # KLUDGE!!
+day_stamps <- day_stamps[-length(day_stamps)] # KLUDGE to get 150 days
 
 #difftime(end_date, start_date, units = "days")
 
@@ -115,27 +115,33 @@ DLI_scale <- function(lite) {
 # sw CO2 measured in ppm which is euqivalent to uatm requred by carb().
 # Summarizes several years of data into a 'climatology', and interpolates missing days.
 LoadAkFerryCO2Data <- function(){
-  x<- read.csv(paste(data_dir, "HakaiColumbiaFerryResearch.txt", sep="/"))
+#  x<- read.csv(paste(data_dir, "HakaiColumbiaFerryResearch.txt", sep="/"))
+  x<- read.csv(paste(data_dir, "HakaiColumbiaFerryResearch_V2.txt", sep="/"))
   
-  # Muck about with the date to 1) standardize on 6 digits, 2) replace year.
-  a  <- ifelse(nchar(x$s.PC_Date) < 6, paste0("0", x$s.PC_Date), x$s.PC_Date)
-  aa <- as.Date( a, format = "%d%m%y" )
-  
-  # Pull the data we want: this is in ppm units. 
-  b <- x$s.calibrated_SW_xCO2_dry
+  # Keep just date, T, S, and calibrated_SW_CO2 ... 
+  xx <- x[, c(1,4,5,6)]
+  names(xx)
+  xx <- xx[ complete.cases( xx ), ]
+  aa <- as.Date( xx$time )
   
   # Build a dataframe
   #foo       <- data.frame( "date" = aa, "SW_CO2" = b)
   #CO2_daily <- data.frame( "month"=month(foo$date), "day"=day(foo$date), "CO2"=foo$SW_CO2  )
-  CO2_daily <- data.frame("month"=month(aa), "day"=day(aa), "CO2"=b )
+  CO2_daily <- data.frame("month"=month(aa), "day"=day(aa),
+                          "CO2"  = xx$calibrated_SW_xCO2_dry,
+                          "Temp" = xx$TSG_T,
+                          "Salt" = xx$TSG_Salinity)
   
   # Get the daily mean for available dates from Oct 2017 to Oct 2019
   CO2_daily <- CO2_daily %>%
     group_by(month, day) %>%
     summarise(
-      CO2mn = mean(CO2, na.rm = TRUE),   # Mean of SW CO2
+      CO2mn = mean(CO2,  na.rm = TRUE),   # Mean of SW CO2
+      Tmn   = mean(Temp, na.rm = TRUE),
+      Smn   = mean(Salt, na.rm = TRUE),
     )
   
+  # Need to rebuild the date after summarising
   aa <- as.Date(paste("2023", CO2_daily$month, CO2_daily$day, sep='-'), format = "%Y-%m-%d")
   CO2_daily$date <- aa
   
@@ -143,7 +149,7 @@ LoadAkFerryCO2Data <- function(){
 }
 
 # Take the daily AK data make it match the BATI mooring days (i.e., extrapolate)
-PrepAKFerryCO2Data <- function(dCO2, all_days){
+PrepDailyAKFerryCO2Data <- function(dCO2, all_days){
   
   # Start with some dates on the CO2 data. Needs a faux year
   # full_dates <- as.Date(paste("2023", dCO2$month, dCO2$day, sep='-'), format = "%Y-%m-%d")

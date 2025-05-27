@@ -14,7 +14,6 @@
 #################################################################################
 
 
-
 #-------------
 # Estimating Rmax for the logistic model. 
 # 6 month daily growth rate, R found manually. 
@@ -25,9 +24,6 @@ for (t in 1:round(365/2) ) {
   x <- c( x, y)
 }
 plot(x)
-
-
-
 
 
 #---- WORKING on DEB code  ----

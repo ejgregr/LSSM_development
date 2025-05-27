@@ -39,9 +39,11 @@ source( "LSSM_configuration.R" )
 ctd_BATI <- Load2023MooringData()
 t_stn5 <- ctd_BATI[ ctd_BATI$site == "mooring5", ]
 t_stn6 <- ctd_BATI[ ctd_BATI$site == "mooring6", ]
+t_stn7 <- ctd_BATI[ ctd_BATI$site == "mooring7", ]
 
 BATI5 <- PrepBATIMooringData( t_stn5, start_date, end_date )
 BATI6 <- PrepBATIMooringData( t_stn6, start_date, end_date )
+BATI7 <- PrepBATIMooringData( t_stn7, start_date, end_date )
 
 length(hour_stamps)
 length(BATI5$temp)
@@ -54,17 +56,22 @@ x <- hour_stamps[-length(hour_stamps)]
 par(mfrow=c(2,1), mar=c(4,4,2,1) )
 
 plot( x, BATI5$temp, type='l', main= "BATI Mooring 5", xlab="", ylab="Temperature (C)" )
-plot( x, BATI6$temp, type='l', main= "BATI Mooring 6", xlab="", ylab="Temperature (C)" )
+plot( x, BATI7$temp, type='l', main= "BATI Mooring 7", xlab="", ylab="Temperature (C)" )
 
 plot( x, BATI5$salt, type='l', main= "BATI Mooring 5", xlab="", ylab="Salinity (psu)" )
-plot( x, BATI6$salt, type='l', main= "BATI Mooring 6", xlab="", ylab="Salinity (psu)" )
+plot( x, BATI7$salt, type='l', main= "BATI Mooring 7", xlab="", ylab="Salinity (psu)" )
 
 # Calculate and show Daily mooring data ... needed for parametric model.
 day_BATI5 <- MooringtoDays(BATI5)
-day_BATI6 <- MooringtoDays(BATI6)
+day_BATI7 <- MooringtoDays(BATI7)
 x <- day_stamps
-plot( x, day_BATI5$temp, type='l', main= "Daily Temperature (BATI 5)", xlab="", ylab="(C)" )
-plot( x, day_BATI5$salt, type='l', main= "Daily Salinity (BATI 5)", xlab="", ylab="(psu)" )
+
+par(mfrow=c(2,2), mar=c(1,4,2,1) )
+plot( x, day_BATI5$temp, type='l', main= "Daily T/S (BATI 5)", xaxt = "n", xlab="", ylab="Temperature (C)" )
+plot( x, day_BATI7$temp, type='l', main= "Daily T/S (BATI 7)", xaxt = "n", xlab="", ylab="" )
+par(mar=c(4,4,0,1) )
+plot( x, day_BATI5$salt, type='l', main= "", xlab="", ylab="Salinity (PSU)" )
+plot( x, day_BATI7$salt, type='l', main= "", xlab="", ylab="" )
 
 
 #---- Part 1b) Organize light data ---- 
@@ -92,19 +99,19 @@ plot( day_stamps, daily_DLI, type='l', main= "Daily Light Intensity (simulated)"
 
 rm(daily_TA)
 daily_TA <- data.frame( "B5" = CalcAlk( day_BATI5$salt ),
-                        "B6" = CalcAlk( day_BATI6$salt ))
+                        "B7" = CalcAlk( day_BATI7$salt ))
 
-plot( day_stamps, daily_TA$B5, type='l', main= "Average, Daily Total Alkalinity (BATI5)", 
-      xlab="", ylab="mol / kg" )
+#plot( day_stamps, daily_TA$B5, type='l', main= "Average, Daily Total Alkalinity (BATI5)", 
+#      xlab="", ylab="mol / kg" )
 
 # Empty plot to fill the space 
-plot(1, 1, type = "n", xlab = "", ylab = "", axes = FALSE, main = "Empty Plot")
+#plot(1, 1, type = "n", xlab = "", ylab = "", axes = FALSE, main = "Empty Plot")
 
 #----- Part 1d) Estimate ambient pCO2 from Ak Ferry data ---- 
 # Not strictly related to kelp growth, but necessary to estimate pH effect
 
 ak_dat      <- LoadAkFerryCO2Data()
-daily_swCO2 <- PrepAKFerryCO2Data(ak_dat, day_stamps)
+daily_swCO2 <- PrepDailyAKFerryCO2Data(ak_dat, day_stamps)
 
 # Show the Ak ferry data, before and after interpolation  
 plot(ak_dat$date, ak_dat$CO2mn, type = "o", main = "Ak Ferry daily Seawater pCO2 climatology",
@@ -115,13 +122,20 @@ plot(daily_swCO2$Date, daily_swCO2$dCO2, type = "o", main = "Ak Ferry daily seaw
      xlab = "Date", ylab = "uatm", col = "blue", lwd = 2, xaxt = "n")
 axis.Date(1, at = daily_swCO2$Date, format = "%m-%d")
 
+pH  <- carb( flag=24, ak_dat$CO2mn, CalcAlk(ak_dat$Smn), S=ak_dat$Smn, T=ak_dat$Tmn )$pH
+DIC <- carb( flag=24, ak_dat$CO2mn, CalcAlk(ak_dat$Smn), S=ak_dat$Smn, T=ak_dat$Tmn )$DIC
+
+# pH and DIC won't plot until daily averages are calculated for them ... 
+length(pH)
+length(daily_swCO2$Date)
+
 
 #----- Part 2 Grow a kelp plant during main growing season (MAY to SEPT) -----
 # Parametric model, currently using simple logistic growth, with 
 # optional temperature and light inhibition factors
 
 # Calculate temperature and light variability (inhibition factors)
-temp_fact <- t_scale( day_BATI5$temp )
+temp_fact <- t_scale( BATI5$temp )
 DLI_fact  <- DLI_scale( daily_DLI )
 
 # Show the inhibition factors 
@@ -129,13 +143,16 @@ plot( temp_fact, type = 'l' )
 plot( DLI_fact, type = 'l' )
 
 # Straight up logistic growth, no inhibition factors
+# Growth based on daily temperature  ... 
 y <- NULL
-for (t in 1:length( temp_fact )) {
+for (t in 1:length( day_BATI5$temp )) {
   one <- logistic_growth( B_init, B_max, r_max, t)
   y <- c(y, one)
 }
+plot( y*1000, type='l',xlab = 'Hours', ylab = 'grams', main='A plant - simple logistic growth')
 log_simp <- y
 
+# Inhibition factors currently foobared because of day/time scaling. 
 # Logistic growth with temperature and light inhibition factors
 y <- NULL
 for (t in 1:length( temp_fact ) ) {
@@ -144,9 +161,10 @@ for (t in 1:length( temp_fact ) ) {
 }
 log_env <- y
 
+length(day_stamps)
+length(log_env)
 # Comparison of simple vs. inhibited plant growth
-plot( day_stamps,log_simp*1000, type='l',xlab = 'Days', ylab = 'grams', main='A plant - simple logistic growth')
-plot( day_stamps, log_env*1000, type='l',xlab = 'Days', ylab = 'grams', main='A plant - inhibited logistic growth')
+#plot( log_env*1000, type='l',xlab = 'Days', ylab = 'grams', main='A plant - inhibited logistic growth')
 
 # NOTE: log_env implies 'shrinkage' rather that slowed growth. This is at least 
 # partially because a population would shrink if r is reduced, but doesn't work
@@ -174,13 +192,13 @@ gDIC_fixed <- kelp_grow * 1000 * wet_to_dry * dry_to_C
 molDIC_fixed <- gDIC_fixed / (27.51+30) / 2
 
 #Now the cumulative DIC fixed over 150 days (is the same shape as growth)
-plot( day_stamps, molDIC_fixed )
+#plot( day_stamps, molDIC_fixed )
 
 #Use diff() to return difference btwn consecutive elements. So now its DIC fixed/day
 #This is equivalent to the rate of kelp growth. 
 delkDIC <- diff( molDIC_fixed ) 
 #NOTE: Length is now day_stamps-1
-plot( day_stamps[-length(day_stamps)], delkDIC, ylab = "mol DIC fixed / day" )
+#plot( day_stamps[-length(day_stamps)], delkDIC, ylab = "mol DIC fixed / day" )
 
 #----- Part 3b) Ambient DIC and baseline pH
 # AMBIENT DIC  ...
@@ -191,8 +209,11 @@ daily_ocean <- data.frame( 'days' = day_stamps,
                            'salt' = day_BATI5$salt,
                            'pCO2' = daily_swCO2$dCO2,
                            'totA' = daily_TA$B5 )
- dim(daily_ocean)
- mean(daily_ocean$salt)
+ 
+# For some reason, first day of PCO2 is NAN ... do need to fix the hour <--> day scaling. 
+dim(daily_ocean)
+daily_ocean$pCO2[1] <-mean(daily_ocean$pCO2[-1])
+ 
  
  #----- Convert ambient pCO2 to DIC using pCO2 and totA. -----
  baseline <- carb( flag_CA, var1=daily_ocean$pCO2, var2=daily_ocean$totA,
@@ -212,15 +233,26 @@ plot( x=daily_ocean$days, y=baseline$pH, type='l', xlab='', ylab='pH')
 
 #----- some checks on DIC and pH inside and out  -----
 # Compare carb() results for DIC from pCO2 for B5 (QCS) and B6 (KI). 
-x1 <- carb( flag_CA, var1=daily_ocean$pCO2, var2=daily_TA$B5, S=day_BATI5$salt, T=day_BATI5$temp )
-x2 <- carb( flag_CA, var1=daily_ocean$pCO2, var2=daily_TA$B6, S=day_BATI6$salt, T=day_BATI6$temp )
+
+x1a <- carb( flag_CA, var1=daily_ocean$pCO2, var2=daily_TA$B5, S=day_BATI5$salt, T=day_BATI5$temp, 
+            k1k2="m06", pHscale="SWS" )
+
+ssalt <- pmax( day_BATI5$salt, 5 )
+x1b <- carb( flag_CA, var1=daily_ocean$pCO2, var2=daily_TA$B5, S=ssalt, T=day_BATI5$temp, 
+            k1k2="m06", pHscale="SWS" )
+
+x1a$pH-x1b$pH
+
+
+x2 <- carb( flag_CA, var1=daily_ocean$pCO2, var2=daily_TA$B7, S=day_BATI7$salt, T=day_BATI7$temp )
+#plot( x1$S, day_BATI5$salt )
 
 # First, DIC at B5 vs B6 little different. So appears pCO2 is a main driver of DIC,
 # regardless of Alkalinity. pCO2, Temp, and Salt constant
 par(mfrow=c(3,2))
 par(mar=c(0,4,3,1) )
 plot(daily_TA$B5, type='l', xaxt = "n", main="pCO2 to pH - B5")
-plot(daily_TA$B6, type='l', ylab="", xaxt = "n", main="pCO2 to pH - B6")
+plot(daily_TA$B7, type='l', ylab="", xaxt = "n", main="pCO2 to pH - B7")
 
 par(mar=c(0,4,1,1) )
 plot(x1$DIC, type='l', xaxt = "n")
@@ -232,48 +264,9 @@ plot( day_stamps, x1$pH, type='l' )
 plot( day_stamps, x2$pH, type='l', ylab="" )
 
 
-
 #---- Thinking about volume effects ----
 # Above is all based on 1 kg of water. 
 # At what mass/volume is the reduction in DIC not significant?
-
-
-# Example usage:
-DIC_removed <- 156.1458  # Total DIC removed by kelp (moles)
-DIC_ambient <- 2.572458  # Mean ambient DIC (moles/kg)
-x <- dilution_mass(DIC_removed, DIC_ambient, epsilon = 0.01)  # 1% threshold
-
-
-
-DIC_ambient - (DIC_removed/x)
-
-
-
-
-# Function to estimate the 
-dilution_mass <- function(DIC_removed, DIC_ambient, epsilon = 0.01) {
-  # Ensure epsilon is positive and reasonable
-  if (epsilon <= 0 || epsilon > 1) {
-    stop("Epsilon should be between 0 and 1 (e.g., 0.01 for 1%, 0.05 for 5% significance)")
-  }
-  # Calculate required water mass (kg)
-  M <- DIC_removed / (epsilon * DIC_ambient)
-  
-  return(M)
-}
-
-
-
-
-
-
-
-
-DIC_removed   <- sum( molDIC_fixed )
-max( baseline$DIC )
-
-
-
 
 
 # We can look at daily changes in pH from ambient attributable to kelp. 
@@ -298,6 +291,114 @@ legend("bottomleft", legend = c("Ambient", "Kelp-affected"), col = c("red", "gre
 #   also with upwelling events that introduce new DIC-rich waters.
 
 
+# Calculate effect of kelp growth at different volumes -------------------------
+
+# Volumes in litres / kg of water to iterate over
+volumes <- c(50, 100, 500, 1000, 5000, 10000, 100000, 1000000)
+
+# This is the moles of DIC fixed per day by the kelp growth
+molDIC_fixed
+
+# This is the 'ambient' conditions that we will use - x1 = BATI5, x2 = BATI6
+# As flagged above, we can't just use these outputs, we need to re-run carb so the results are comparable
+ambient_data <- carb(flag_AD, var1=x1$ALK, var2=x1$DIC, S=day_BATI5$salt, T=day_BATI5$temp)
+plot( ambient_data )
+
+# Create a list to store the outputs
+adjusted_chem <- list()
+
+# iterate over each volume
+for(i in 1:length(volumes)) {
+  
+  # calculate DIC fixed per litre
+  molDIC_fixed_per_kg <- molDIC_fixed / volumes[i]
+  # Calculate carbonate chemistry - using Alkalinity and DIC, with DIC adjusted based on kelp carbon fixation
+  chem_out <- carb(flag_AD, var1=ambient_data$ALK, var2=(ambient_data$DIC - molDIC_fixed_per_kg),
+                   S=ambient_data$S, T=ambient_data$T )
+  # label with the volume
+  chem_out$Volume_kg <- volumes[i]
+  # Calculate delta pH, the difference from ambient
+  chem_out$delta_pH <-  chem_out$pH - ambient_data$pH
+  # Calculate delta pCO2, the difference from ambient
+  chem_out$delta_pCO2 <-  chem_out$pCO2 - ambient_data$pCO2
+  # save output as list element
+  adjusted_chem[[i]] <- chem_out
+}
+
+x <- adjusted_chem
+# combine the results in a single dataframe, add a day of year column too
+
+#adjusted_chem <- lapply(adjusted_chem, function(x) x %>% mutate(DoY = c(1:nrow(x))))
+adjusted_chem <- lapply(adjusted_chem, function(x) x %>% mutate(DoY = day_stamps) )
+
+
+adjusted_chem <- bind_rows(adjusted_chem)
+
+# Make volume a factor
+adjusted_chem$Volume_kg <- factor(adjusted_chem$Volume_kg)
+
+
+adjusted_chem[ adjusted_chem$Volume_kg == 1000000, ]$delta_pCO2
+# Surface plots --------------------------------------------------------------------------------------------------------
+
+# pH over time, by volume
+ggplot(adjusted_chem) +
+  geom_line(aes(x = DoY, y = pH, colour = Volume_kg))
+
+
+# Difference from Ambient
+ggplot(adjusted_chem) +
+  geom_line(aes(x = DoY, y = delta_pH, colour = Volume_kg), size=1.1) + 
+  labs(
+    title = "Daily pH Change from Ambient for Different Water Masses",  # Add your title here
+        x = "Day of Year",  # Change x-axis label
+    y = "Daily Change (pH)", # Change y-axis label
+    colour = "Water Mass (kg)" # Change legend title
+  ) +
+  theme_light() +
+  theme(
+    text = element_text(size = 16),  # Increases all text size
+    axis.title = element_text(size = 18),  # Axis labels size
+    axis.text = element_text(size = 14),   # Axis tick labels size
+    axis.title.x = element_text(margin = margin(t = 10)),  # More space above x-axis title
+    axis.title.y = element_text(margin = margin(r = 20)),   # More space to the right of y-axis title
+    legend.text = element_text(size = 14), # Legend text size
+    legend.title = element_text(size = 16) # Legend title size
+  )  
+
+
+ggplot(adjusted_chem) +
+  geom_point(aes(x = DIC, y = pH, colour = ALK)) +
+  facet_wrap(~Volume_kg)
+
+
+library(plotly) # for 3D plots
+
+glimpse(x1)
+
+pairs(x1 %>% select(S, `T`, pH, pCO2, DIC, ALK), main = "Pairwise plot of daily chemistry parameters (x1; BATI5).")
+pairs(x2 %>% select(S, `T`, pH, pCO2, DIC, ALK), main = "Pairwise plot of daily chemistry parameters (x2; BATI6).")
+
+
+p <- plot_ly(data = adjusted_chem %>%
+               mutate(Volume_kg = as.numeric(as.character(Volume_kg))),
+             x = ~log10(Volume_kg), y = ~DIC, z = ~`pH`, color = ~`pH`, type = "scatter3d") %>%
+  layout(title = "Volume adjusted chemistry with kelp growth")
+
+
+htmlwidgets::saveWidget(p, file = "pH_DIC_by_volume.html")
+
+
+# surface plot requires a matrix with evenly spaced values. example below
+m = matrix(rnorm(25),nrow = 5, ncol = 12)
+
+plot_ly(z = ~m) %>% 
+  add_surface()
+
+
+
+
+
 #---- Knit and render Markdown file to PDF -----
 # First had to install the library tinytex.
 # then run >tinytex::install_tinytex()
@@ -308,6 +409,6 @@ today <- format(Sys.Date(), "%Y-%m-%d")
 rmarkdown::render( "LSSM_documentation.Rmd",   
                    output_format = 'pdf_document',
                    output_dir = DEB_dir,
-                   output_file = paste0( "LSSM_DEB_testing_", today ))
+                   output_file = paste0( "LSSM_testing_", today ))
 
 #FIN
