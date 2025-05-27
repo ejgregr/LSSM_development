@@ -44,6 +44,8 @@ DEB_dir  <- "C:/Data/Git/LSSM_development/DEB"
 start_date <- as.POSIXct("2023-05-03 16:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
 end_date   <- as.POSIXct("2023-09-29 23:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
 hour_stamps <- seq(from = start_date, to = end_date, by = "hour")
+# KLUDGE: Shortening hour_stamps by 1h. 
+hour_stamps <- hour_stamps[-length(hour_stamps)]
 
 # Create compatible x-axis labels
 day_stamps <- hour_stamps %>%
