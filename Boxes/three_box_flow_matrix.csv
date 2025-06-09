@@ -1,0 +1,5 @@
+From,To,Tide,RF_surface,RF_bottom,exch_fraction
+Ocean,Coast,flood,1,0.5,0.05
+Coast,Ocean,ebb,0.8,0.4,0.05
+Coast,Intertidal,flood,1,0,0.2
+Intertidal,Coast,ebb,1,0,0.5

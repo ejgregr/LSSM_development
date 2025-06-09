@@ -8,6 +8,7 @@ output:
     latex_engine: pdflatex # Specify the LaTeX engine (pdflatex, xelatex, or lualatex). This renders the pdf
     number_sections: true # Optional, if you want numbered sections
     toc: true             # Table of contents (optional)
+    toc_depth: 3          # Show 3 level headings
 fontsize: 11pt            # Set font size (optional)
 geometry: margin=1in      # Set margins (optional)
 header-includes:
@@ -20,218 +21,250 @@ header-includes:
   - \setlength{\textfloatsep}{5pt} % Vertical space below (above) [t] ([b]) floats
   - \setlength{\abovecaptionskip}{10pt}
   - \setlength{\belowcaptionskip}{1pt}
+  - \newcommand{\tab}{\hspace*{0.5cm}}
 ---
+<!--  
+NB: Sometimes kable makes trouble. In which case, may need to re-install as update doesn't work. 
+> tinytex::uninstall_tinytex()
+> tinytex::install_tinytex()   -->
+
+\newpage
 
 # Overview
+This document summarises the analyses done in R to support the Broughton Local Seaweed Services Model (LSSM) (aka *"Models, mesocosms, and field work to assess kelp mitigation of ocean acidification and hypoxia"*). 
 
-\[
-x = a^2 + b^2
-\]
+Relevant aspects include the marine characterisation, the growth of kelp, and the estimation of the effect of kelp forests on the local ocean chemistry. As a fundamental aspect of this project is the iterative development of the model, we first developed a proof-of-concept model by combining example data with parameters from the literature. The proof-of-concept is intended to show that the proposed simulation is tractable within the scope envisioned for the work. We then upgraded the proof-of-concept to a more accurate and defensible working prototype by making the individual model components more realistic, and parameterising them with with *in situ* data collected as part of this project. 
 
-This document summarises the analyses done in R to support the Broughton Local Seaweed Services Model (LSSM) (aka "Models, mesocosms, and field work to assess kelp mitigation of ocean acidification and hypoxia"). 
+# Model assumptions
 
-The concentration is $10^3$ µmol/m$^3$.
-
-
-Relevant aspects include the marine characterisation, the growth of kelp, and the estimation of the effect of kelp forests on the local ocean chemistry. A fundamental aspect of this project is the iterative development of the model. Each aspect is first constructed with using available data and parameters obtained from the literature. The accuracy of the marine characterisation and kelp growth are then improved using local data and a dynamic energy-budget growth model (DEB). The DEB is described below in detail to faciliate the interpretation of the outputs. 
-
-Seasonal growth and OA effects are estimated using a daily temporal resolution, beginning with a 1-dimensional plant model. 
-
+- Kelp growth and its effect on DIC will (eventually) be modelled at an hourly resolution. 
+- OA effects and mixing for the box models will be estimated using a temporal resolution defined by the tidal cycle. 
+- Uniform mixing within the boxes of the box model.
 
 # Methods
+## Marine characterisation
+To understand how kelp growth my influence ocean acidification, we needed to start with a reasonable description of the marine environment. For the proof-of-concept, we used available oceanographic data for the region, and upgraded the prototype using data collected for purpose as part of this project. There has been considerable work in the region over the last few years, including as part of the Broughton Archipelago Transition Initiative (BATI) and the Marine Planning Partnership (MaPP). Some of the mooring and field sampling data from these program relevant to this work (Figure 1).
 
-## The box model
-### Model Structure and Spatial Configuration
+```{r fig:external_image, echo=FALSE, fig.cap="Study area showing field sites and historic BATI and MaPP moorings", fig.align="center", out.width="100%", fig.pos="H"}
+knitr::include_graphics("D:/Dropbox/Scitech/Broughton/Broughton_2025.png")
+```
 
-We constructed a two-layer estuarine box model comprising 6 to 9 horizontally aligned segments, each divided into a surface and bottom layer. This configuration captures both longitudinal gradients (e.g., salinity intrusion) and vertical stratification. Box boundaries were defined based on known geomorphic or hydrodynamic features such as the estuary mouth, mid-estuary transition zones, and freshwater inflow regions. Each box was assumed to be internally well-mixed. Table 1 summarizes the structural properties of each box, including depth and volume.
+### Temperature and salinity
+BATI has 2023 data from 8 moorings in the region. Main ones of interest to this project are B5, in Blackfish Sound, and B7, in a sheltered location west of Gilford Island. The BATI moorings include a variety of sensors at different depths: 0.5 m = StarOddi CTD (T/S); 1.5 and 3 m = Hobo (T and Light); Bottom = T (Hobo). These data have been processed by Romina into a workable file of surface T/S (ctd_surface_cond_moorings2023.csv). T at depth from the Hobo sensors are contained in a separate file. 
 
-### Physical State Variables and Properties
-Each box tracked time-dependent physical state variables relevant to estuarine stratification and mixing: temperature (T, in C), salinity (S, in PSU), and water density (rho, in kg/m³), with density calculated at each time step using the UNESCO equation of state (rho = f(T, S)). These variables formed the basis for resolving both horizontal and vertical exchange dynamics. Optionally, additional state variables such as dissolved oxygen, dissolved inorganic carbon (DIC), or nutrients (e.g., nitrate, phosphate) could be included, depending on the modeling objectives. The model also allowed for the calculation of light attenuation, vertical density gradients, and buoyancy frequencies to inform stability and mixing thresholds.
+MAPP has 5 moorings in the area. Of interest may be M5 (in QCS) and M4 (at the entrance to Knight Inlet). The MAPP moorings collect only surface (~ 1 m) T/S. These data have not yet been processed.
 
+Environmental button loggers (T only) are distributed around the region and have been collecting data since 2022. Currently unclear on the number and locations, but could be useful for estimating spatial and temporal variance in T. Finally, T/S profiles were collected during kelp sampling work in 2023. However, as these are only point estimates, it's not clear how they could be leveraged for this study. 
 
-# Marine characterisation
+### Light
+Light data from the Hobos are challenging because the sensors foul up, and thus require regular cleaning. The data are available but need to be cleaned for the attenuation of light levels due to fouling. An algorithmic approach would seem to be warranted, along with a decision of when and whether to cull or correct the data. This work is pending, thus the light measurements are unlikely to be available for this work. 
 
-## Temperature and salinity
-BATI has 2023 data from 8 moorings in the region. Main ones of interest to this project are B5, which is in Blackfish Sound, and B7, which is in a sheltered location west of Gilford Island, not unlike the Village Island basin. 
+We therefore simulated a Daily Light Integral (DLI) for our proof-of-concept model. DLI is a measure of the total amount of photosynthetically active radiation (PAR) received over a day. We first calculate PAR in units of *(µmol photons m$^{-2}$ s$^{-2}$)*. PER HOUR? This was developed with support from ChatGPT. The photoperiod is simulated hourly for a year to match the DEB. DLI is related to PAR as (PARavg X photoperiod / 10$^6$). So in our case, we just need to daily averages over 10$^6$ (things coverts µmoles to moles giving DLI in *(µmol photons m$^2$ day$^{-1}$*).
 
-The BATI moorings include sensors at different depths:
-0.5 m = StarOddi CTD (T/S); 1.5 and 3 m: Hobo (T and Light); Bottom: T (sensor?). These data have been processed by Romina into a workable file of surface T/S with Station ID added (ctd_surface_cond_moorings2023.csv). A second file includes T at depth from the Hobo sensors on these moorings. 
+**Currently can't match Pontier's DLI values without a fudge factor. Check PAR function first.**
 
-MAPP also has 5 moorings in the area. Of interest may be M5 (in QCS) and M4 (at the entrance to Knight Inlet). The MAPP moorings include a StarOddi only, collecting T/S at surface (~ 1 m). These data have not yet been processed.
-
-## Alkalinity
+### Alkalinity
 Alkalinity is needed to calculate pH. Fortunately, it has a strong relationship with salinity. BATI moorings have salinity, so can get TA from salinity relationship. THis has been derived by Evans for various locations in the eastern Pacific. For example:
 
-  TA = 48.771 * S + 606.23 umol $kg-1$ (Evans et al. 2015, for SE Ak)  
-  TA = 59.88  * S + 278.79 umol $kg-1$ (Evans et al. 2019, for the Northern Salish Sea)  
+\tab TA = 48.771 * S + 606.23 $\mu{mol}/kg^{-1}$ (Evans et al. 2015, for SE Ak)  
+\tab TA = 59.88  * S + 278.79 $\mu{mol}/kg^{-1}$ (Evans et al. 2019, for the Northern Salish Sea)  
 
-The fit is tight (r2 = 0.94, root mean square error = 17.21 umol kg$-1$), and was calculated using only salinity data < 33.6.
+The fit is tight (r$^2$ = 0.94, root mean square error = 17.21 $\mu{mol}/kg^{-1}$, and was calculated using only salinity data < 33.6.
 
-## Light simulation
-Light data from the Hobos are challenging because the sensors foul up and need cleaning. The data thus need to be cleaned for the deteriorating light levels (this work is pending for Romina). 
+### Ocean carbon 
+For our proof-of-concept model, we obtained pCO$_2$ measures from the Alaska Marine Highway System M/V Columbia during 135 service route transits between October 2017 and October 2019. 
 
-The Daily Light Integral (DLI) is a measure of the total amount of photosynthetically active radiation (PAR) received over a day. We first calculate PAR in units of *(umol photons m$-2$ s$-2$)*. PER HOUR? This was developed with support from ChatGPT. The photoperiod is simulated hourly for a year to match the DEB. DLI is related to PAR as (PARavg X photoperiod / 1e6). So in our case, we just need to daily averages over 1e6 (things coverts micromoles to moles giving DLI in *(mol photons m$2$ day$-1$*).
+We collected near-continuous measurements of pCO$_2$ along with ancillary measurements of temperature and salinity using two moorings. We also obtained direct measurements of pCO2, total DIC (or TCO2), and salinity from Water samples collected across time and space (see Figure X). Underway surface water measurements were collected from The vessel sailed south from Ketchikan every Wednesday, arrived in Bellingham on Friday, returned to Ketchikan on Sunday. Measurements of temperature, salinity, dissolved oxygen content, and CO$_2$ partial pressure were made every 2 mins on seawater drawn into the vessel from a ~2 m intake. A subset of these data were extracted for the southeastern portion of Queen Charlotte Strait, adjacent to our area of interest (i.e., between 50.6 and 50.7N, and -126.7 and -126.8W). This yielded 676 time stamped records that included T, S, and several different pCO$_2$ measures. These data formed the basis of our ambient, or kelp-unaffected water.   
 
-Currently can't match Pontier's DLI values without a fudge factor. Check PAR function first. 
+Sample data for model development taken from Alaska ferry data. Accessible here:  
+https://catalogue.hakai.org/erddap/tabledap/HakaiColumbiaFerryResearch.html
 
-## Ambient/reference DIC
-Sample data for model development taken from Alaska ferry data. Accessible here:
-https://catalogue.hakai.org/erddap/tabledap/HakaiColumbiaFerryResearch.html  
+Our prototype parameters were upgraded with data from project-specific moorings that included a CO2Pro sensor to measure pCO$_2$ along with ancillary measurements of temperature and salinity, and dissolved O$_2$. Analyses of water samples collected during the 2025 growing season will provide direct measurements of pCO$_2$, total DIC (or TCO$_2$), and salinity.  
 
-Between October 2017 and October 2019, underway surface water measurements were collected from the Alaska Marine Highway System M/V Columbia during 135 service route transits. The vessel sailed south from Ketchikan every Wednesday, arrived in Bellingham on Friday, returned to Ketchikan on Sunday. Measurements of temperature, salinity, dissolved oxygen content, and CO2 partial pressure were made every 2 mins on seawater drawn into the vessel from a ~2 m intake.
+## Kelp growth
+### Proof of concept
+We began by searching the literature for the available data on growth rates of bull kelp (*Nereocystis luetkeana*). Weigel and Pfister (2021) sampled kelp at peak biomass (June to Sept). They found:  
+\tab Avg blade length             = 142+/-8.5 cm  
+\tab Avg dry mass                 = 4.13+/-0.27 g  
+\tab Scaled C fixing rate         = 2.35+/- kg C / m$^2$ * yr  
+\tab Mean no. of plants per m2    = 7.66+/-0.86  
+\tab Mean no. of blades per indiv = 41.5+/-2.95.  
 
-A subset of these data were obtained from Hakai, restricted spatially to the southeastern portion of Queen Charlotte Strait, adjacent to our area of interest (i.e., between 50.6 and 50.7N, and -126.7 and -126.8W). This yielded 676 records with the attributes date/time, lat, lon, T, S, and several different pCO2 measures. 
+The fixing rate is NET primary production, after accounting for the proportion C lost as respiration (0.27+/-0.08). Of this, 0.16 is estimated to be released as DOC (based on other studies - REFs). It is also based on a seasonal estimate of daylight hours (Apr-Sep) = 2617. The fixing was extended to an entire kelp forest based on the plant densities and blade counts above. However, the authors noted that earlier density measurements (plants per m$^2$) were lower, e.g., 2.25 (Foreman 1984), 3.7 (Barns and Kalvass 1993), and 4.57 Stekoll et al. 2006).  
 
-# Kelp growth
-## Literature-based growth
-Weigel and Pfister (2021) sampled kelp at peak biomass (June to Sept). They found:
-Avg blade length     = 142+/-8.5 cm
-Avg dry mass         = 4.13+/-0.27 g
-Scaled C fixing rate = 2.35+/- kg C / m2.yr. This is NET primary production, after accounting for the proportion C lost as respiration (0.27+/-0.08), of which, based on other studies (REF), 0.16 is released as DOC.
+For our POC model, we translated the fixing rate of kgC/m2/yr to a plant: 2.35/7.66 = 0.30 kg C / yr / plant. As a realism check, we converted the carbon fixed to wet weight using available conversion factors (dw = 0.13 * ww, from Bullen et al., and kgC = 0.25 kg dw) yielding an estimate of 9.23 (0.30/0.13/0.25) kgWW / yr / plant. Not unreasonable.  
 
-This C fixing rate is based on an estimate of daylight hours (Apr-Sep) = 2617. 
-This is extended to the fixing rate of a KELP FOREST using :
-  mean no. of plants per m2    = 7.66+/-0.86
-  mean no. of blades per indiv = 41.5+/-2.95
-They note that earlier density measurements are lower:  2.25 (Foreman 1984), 3.7 (Barns and Kalvass 1993), and 4.57 indiv per m2 (Stekoll et al. 2006).
+This can be be further scaled to daily or monthly growth by disaggregating total annual daylight hours (Weigel and Pfister 2021). although this would assume uniform growth over the growing period. Nevertheless, further back-calculating kg C / frond, may help parameterise the scaling of the frond-based dynamic energy budget model (below) to a plant. 
 
-Translating a fixing rate of kgC/m2/yr to a plant:
-  2.35/7.66 = 0.30 kg C / yr / plant 
+For the POC model, we created a simple logistic growth model parameterised with the mature plant biomass (9.23 kgWW) estimated above.  
 
-As a realism check, convert the carbon fixed to wet weight. Using available conversion factors:  
-  dw   = 0.13 * ww (Nereo, from Bullen)  
-  kgC  = 0.25 kg dw  
+### Dynamic energy budget growth model
+The dynamic energy budget (DEB) model developed by XXX is awaiting calibration for nereocystis by Barbosa. Our proposal relied on the completion of this model to provide a more defensible representation of kelp growth for the prototype model. The DEB parameters are  described in detail below to facilitate the eventual interpretation of the outputs. 
 
-Leads to an estimate of 9.23 (0.30/0.13/0.25) kgWW / yr / plant. Not unreasonable.  
+The dynamics of the DEB are represented by three state variables:  
+\tab Mv (MolV)                     = the structural mass,  
+\tab meN = MeN/Mv (molN molV$^-1$) = the nitrogen reserve density,  
+\tab meC = MeC/Mv (molC molV$^-1$) = and the carbon reserve density.  
+MeC and MeN are the masses of the C and N reserves.  
 
-This can be scaled to daily or monthly growth, by disaggregating total annual daylight hours (Weigel and Pfister 2021). From this we could also back calculate:  
-kg C / frond, which would allow comparisons to the results of the DEB and may help parameterise scaling of the DEB to a plant. 
-
-## Dynamic energy budget growth model
-The Dynamic energy budget (DEB) developed by XXX was calibrated for nereocystis by Barbosa. 
-
-The dynamics of the DEB are represented by three state variables: 
-  Mv (MolV)                  = the structural mass, 
-  meN = MeN/Mv (molN molV-1) = the nitrogen reserve density, 
-  meC = MeC/Mv (molC molV-1) = and the carbon reserve density. 
-
-MeC and MeN are the masses of the C and N reserves. 
-
-The DEB takes a table of [temperature, nutrients, dissolved inorganic carbon (DIC), and light] as an input:
-
-T =  K,          temperature
-N =  molN/L,     dissolved inorganic nitrogen concentration
-C =  molC/L,     dissolved inorganic carbon concentration
-I = mol^3/m^2/d, photon concentration (= irradiance)
-
-The model returns a table of results for each time step. This table includes a few dozen parameters, with names that follow a standardized approach [see DEB book], summarised below: 
-
-*j* represents a flux rate
-*E* represents a reserve (or energy) unit, for either N or C
-*M* represents molar mass 
-*V* represents the volume of the structure (i.e., frond) in L^3
-*G* is the growth pool for a flux
-*R* is the reproduction pool for a flux
-
-*y* represents yield factors that couple flux processes 
-*t* as a suffix on the variable names, it represents the time step of the variable
-
-The following parameters are (assumed to be) of use to assessing growth effects on ocean chemistry:
-
-Assimilation variable typical pathways:
-  j_NA = molN/molV/h,   uptake rate of N
-  j_CI = molDIC/molV/h, uptake rate of DIC
-  j_I  = specific relaxation rate
-  j_CA = molC/molV/h, DIC assimilation rate
-  j_Ot  = O2 production
-  j_Ct  = Carbon (where?)
-
-Allocation to growth:
-  j_EN_G = specific flux of N to growth SU (after maintenance)
-  j_EC_G = specific flux of C to growth SU (after maintenance)
-  j_G    = gross specific growth rate
-
-Total weight and length are closely correlated, as length is a species-specific function of biomass.
-  Wt       = g
-  L_allomt = cm, physical length
-
-Integration of results into the state variables for next steps: 
-  M_V  = M_V + dMVdt * dt       The volume of the blade in terms of moles;
-  m_EN = m_EN + dmENdt * dt     The mass of the nitrogen reserve;
-  m_EC = m_EC + dmECdt * dt;    The mass of the carbon reserve
+The DEB takes a table of [temperature, nutrients, dissolved inorganic carbon (DIC), and light] as an input:  
+\tab T =  K,          temperature  
+\tab N =  molN/L,     dissolved inorganic nitrogen concentration  
+\tab C =  molC/L,     dissolved inorganic carbon concentration  
+\tab I = mol$^3$/m$^2$/d, photon concentration (= irradiance)  
   
-Molar weights (g/mol) are used for converting moles (the mass unit in the DEB) to grams. These are listed in Lavaud et al.'s Table 2. The values for carbon and nitrogen reserves are higher than their atomic masses as they reflect the average molar mass for the compounds typically found in the reserve pool of kelps. Minerals and inorganics can also make up 15-25% of kelp's dry weight (DEB's typically estimate dry weight).
-  Molar weight of structure wV      27.51
-  Molar weight of N reserve wEN     17
-  Molar weight of C reserve wEC     30
+The model returns a table of results for each time step. This table includes a few dozen parameters, with names that follow a standardised approach, summarised below [see DEB book]:  
+\tab *j* represents a flux rate  
+\tab *E* represents a reserve (or energy) unit, for either N or C  
+\tab *M* represents molar mass  
+\tab *V* represents the volume of the structure (i.e., frond) in L$^3$  
+\tab *G* is the growth pool for a flux  
+\tab *R* is the reproduction pool for a flux  
+\tab *y* represents yield factors that couple flux processes  
+\tab *t* as a suffix on the variable names, it represents the time step of the variable  
+  
+The following DEB outputs are assumed to be of use for assessing the effects of kelp growth on ocean chemistry:
+Assimilation variable typical pathways:  
+\tab j_NA = molN/molV/h,   uptake rate of N  
+\tab j_CI = molDIC/molV/h, uptake rate of DIC  
+\tab j_I  = specific relaxation rate  
+\tab j_CA = molC/molV/h, DIC assimilation rate  
+\tab j_Ot  = $O_2$ production  
+\tab j_Ct  = Carbon (where?)  
+  
+Allocation to growth:  
+\tab  j_EN_G = specific flux of N to growth SU (after maintenance)  
+\tab j_EC_G = specific flux of C to growth SU (after maintenance)  
+\tab j_G    = gross specific growth rate  
+  
+Total weight and length are closely correlated, as length is a species-specific function of biomass:  
+\tab Wt       = g  
+\tab L_allomt = cm, physical length  
 
-# Ocean chemistry
-A critical aspect of estimating the change in pH attributable to kelp. With the data described above, we used carb() from the seacarb package to estimate the change in pH attributable to kelp.
-Some general estimates in NEP coastal waters for sanity checking (from ChatGPT):
-Typical Alkalinity : 1800 - 2300 umol/kg  More in upwelled waters. Varies due to freshwater input, biological processes, and upwelling.  
-Typical DIC        : 2000 - 2500 umol/kg. Upwelled waters at high end.  
-Typical pCO2       : 300 - 450 utm.       >1000 in upwelled waters. This is near equilibrium w atm.  
-Typical pH         : 7.6 to 8.2           Depends on upwelling, biol activity (e.g., ecosystem metabolism - Lowe et al. 2019)  
+Integration of results into the state variables for next steps:  
+\tab M_V  = M_V + dMVdt * dt       The volume of the blade in terms of moles;  
+\tab m_EN = m_EN + dmENdt * dt     The mass of the nitrogen reserve;  
+\tab m_EC = m_EC + dmECdt * dt;    The mass of the carbon reserve  
+  
+Molar weights (g/mol) are used for converting moles (the mass unit in the DEB) to grams. These are listed in Lavaud et al.'s Table 2. The values for carbon and nitrogen reserves are higher than their atomic masses as they reflect the average molar mass for the compounds typically found in the reserve pool of kelps. Minerals and inorganics can also make up 15-25% of kelp's dry weight (DEB's typically estimate dry weight).  
+\tab Molar weight of structure wV      27.51  
+\tab Molar weight of N reserve wEN      17  
+\tab Molar weight of C reserve wEC     30  
+
+### Scaling considerations
+From ChatGPT:
+
+- A mature bull kelp (*Nereocystis luetkeana*) plant can have 30 - 50 blades  
+- The stipe comprises 20-40% of the total biomass, depending on growth stage, season, and environmental factors.  
+- A new sporophyte is typically a few mm to cm in length, and a few to 10s of mg (dry weight).  We began with a parametric model of growth.
+
+## Ocean biochemistry
+We began by working do define some guidelies for the modelling work. These included developing an understanding of the range of potential values (Table 1), and around the most important processes that influence marine biochemistry.
+
+```{r, NameTable, echo=FALSE, results='asis', escape=FALSE}
+name_table <- data.frame( Parameter = c("Alkalinity", "DIC", "pCO2", "pH"),
+  Range = c("1800 - 2300 umol/kg", "2000 - 2500 umol/kg", "300 - 450 utm", "7.6 to 8.2"),
+  Notes = c("More in upwelled waters. Varies due to freshwater, biology, and upwelling",
+            "Upwelled waters at high end",
+            ">1000 in upwelled waters. This is near equilibrium w atm",
+            "Depends on upwelling, biol activity (e.g., ecosystem metabolism - Lowe et al. 2019)"   ))
+
+kable(name_table, format = "latex", booktabs = TRUE, 
+  caption = "General estimates of water quality measures in NEP coastal waters for sanity checking (from ChatGPT).") %>%
+  column_spec(3, latex_column_spec = "p{4in}") %>% 
+  kable_styling(latex_options = c("hold_position"))
+```
+
+We began with a 1-dimensional plant model. This quickly highlighted the need to consider the water volume "treated" by a kelp forest - a critical aspect of estimating the change in pH attributable to kelp. With the data described above, we used the carb() function from the seacarb package to calculate pH and other components of the carbonate cycle to estimate the change in pH attributable to kelp. 
+
+## The box model
+
+### Model assumptions
+- Boxes are horizontally well-mixed and vertically uniform within each layer
+- Advection and dispersion are parameterised, not dynamically modelled
+- Vertical mixing is governed by stratification strength (e.g., Richardson number)  
+- [for now! :] No internal feedbacks (e.g., biogeochemistry altering mixing)  
+- External inputs are exogenous and time-varying (not coupled to internal state)  
+
+### Model structure and spatial configuration
+We constructed a two-layer estuarine box model comprising 6 to 9 horizontally aligned segments, each divided into a surface and bottom layer. This configuration captures both longitudinal gradients (e.g., salinity intrusion) and vertical stratification. Box boundaries were defined based on known geomorphic or hydrodynamic features such as the estuary mouth, mid-estuary transition zones, and freshwater inflow regions. Each box was assumed to be internally well-mixed. Table 1 summarizes the structural properties of each box, including depth and volume.
+
+### Physical state variables and properties
+Each box tracks time-dependent physical state variables relevant to estuarine stratification and mixing: temperature (T, in C), salinity (S, in PSU), and water density (rho, in kg/m³), with density calculated at each time step using the UNESCO equation of state (rho = f(T, S)). These variables formed the basis for resolving both horizontal and vertical exchange dynamics. Optionally, additional state variables such as dissolved oxygen, dissolved inorganic carbon (DIC), or nutrients (e.g., nitrate, phosphate) could be included, depending on the modeling objectives. The model also allowed for the calculation of light attenuation, vertical density gradients, and buoyancy frequencies to inform stability and mixing thresholds.
+
+### Exchange between boxes
+Horizontal exchanges include advection and dispersion. Advection describes bulk water movement (e.g., freshwater inflow, tidal exchange), while dispersion refers to tidal and wind-driven mixing across horizontal gradients. 
+
+Vertical exchanges include Wind-driven vertical mixing and buoyancy suppression from stratification. These are modeled with a vertical diffusivity coefficient (K<sub>z</sub>), and are governed by advection-diffusion equations with mass balance over each box.  
+
+### Boundary conditions and external forcing
+These apply time-varying inputs at the horizontal boundaries of the model and from the atmosphere. They should vary seasonally to simulate stratification and turnover. They can include:  
+- River discharge (Q<sub>r</sub>) – freshwater inflow at the head  
+- Marine exchange (Q<sub>ocean</sub>) – inflow/outflow at the mouth  
+- Ocean salinity and temperature – for boundary boxes, and  
+- Air temperature, wind speed, solar radiation – for surface heat and mixing. 
+
+### Time integration and seasonal dynamics
+
+The model is implemented using tidal time steps over a kelp growing season, and includes seasonal variations in freshwater inflow, thermal stratification, and vertical mixing. State variables in each box evolved according to first-order mass balance equations, numerically integrated using the `ode()` function from the `deSolve` package in R.  
+
+Each scalar state variable (e.g., temperature, salinity, or oxygen) followed a generic advection-diffusion balance:
+\[
+\frac{dC_i}{dt} = \frac{Q_{\text{in}} C_{\text{in}} - Q_{\text{out}} C_{\text{out}}}{V_i} + \text{Mixing} + \text{Sources} - \text{Sinks}
+\]
+
+Where:
+- \( C_i \) = concentration in box \( i \)
+- \( Q_{\text{in}} \), \( Q_{\text{out}} \) = inflow and outflow volumes (m³/s)
+- \( V_i \) = volume of box \( i \)
+- **Mixing** = exchange due to horizontal or vertical dispersion
+- **Sources/Sinks** = external fluxes such as air-sea heat transfer, gas exchange, or biological activity
+
+Vertical mixing rates were dynamically adjusted based on stratification strength. For example, vertical diffusivity \( K_z \) was reduced when density differences between layers exceeded a critical Richardson number threshold.
+
+Simulations were conducted using the `ode()` function from the `deSolve` package in R, with each box represented as a compartment whose state evolved through time according to these differential equations.
+
+# Results
+
+## Box model proof of concept
+An initial set of 7 boxes was defined, with approximate areas measured. Three boundary boxes were used to represent marine and estuarine (from Knight Inlet) flows. Volumes were calculated for surface and deep layers based on a mean depth, and an assumed surfaced mixed layer of 20 m.  
+
+A flow matrix was estimated between the boxes ... 
 
 
-### Other BATI ocean data
-T/S profiles were collected during kelp sampling. Likely only relevant to water column investigations. 
-Environmental button loggers (T only) distributed around the region and collecting data since 2022. Unclear on the number and locations, but should be useful for spatial variance in T. 
 
-## Field data 
-Field observations of nereo helped parameterise growth and distribution
 
-## Spatial data
-We built clusters to estimate the abundance and spatial distribution of nereocystis.
+## Marine characterisation
 
-# Methods
-
-## Building an environmental conditions layer
-The DEB model takes a table of [light, nutrients, temperature, and DIC] as input. 
-
-Currently, this is built with constant but randomized light, nutrients and DIC. Temperature is taken from the BATI5 sensor, with the intent of comparing the pH results to BATI6, thereby comparing a QCS reference (BATI5) with and estuarine site (BATI6).
-
-<!--
-# grow_dat was created to feed the DEB. This is postponed for now as have no well-calibrated DEB. 
-# ```{r envData, echo=FALSE, fig.pos='h', fig.cap="Preliminary Drivers of the Dynamic Energy Budget Model - BATI5", fig.align='center'}
-# 
-# PlotInputs( grow_dat, "May to September Environmental Conditions")
-# ```
--->
-
-# Results 
-Environmental layers are passed through a compilied DEB, leading to an assortment of outputs. 
+## Kelp growth
+The DEB model takes a table (*grow_dat*) of [light, nutrients, temperature, and DIC] as input. Initial testing of the R <--> DEB connection was testing using a table with constant but randomized light, nutrients and DIC. The temperature was taken from the BATI5 mooring. The current DEB code (in LSSM_growth.R) successfully calls the DEB model executable **rundeb_KELP_p2.exe** compiled from MatLab code and passes it the gow_dat table. This leads to hourly values for all the parameters described in the DEB section above. 
 
 Relevant calculations include:
 
-Total C assimilated = sum of carbon assimilation per time step 
-                    = sum of assimilation rate * volume of kelp
-                    = sum( j_CAt [molC/molV/h] * M_Vt [molV] )
+Total C assimilated can be calculated using any of the following:  
+\tab = sum of carbon assimilation per time step   
+\tab = sum of assimilation rate * volume of kelp  
+\tab = sum( j_CAt [molC/molV/h] * M_Vt [molV] ).  
 
-This total partitions to growth and maintenance. 
+This total includes the carbon used for growth and maintenance. The total fixed for growth is available as the sum of carbon used for growth per time step, or sum( j_EC_G [molC/molV/h] * M_Vt [molV] ). Subtracting this from the total C assimilated should yield the C used for maintenance, which is mostly released as respiration (i.e., DIC). 
 
-Total C fixed for growth = sum of carbon used for growth per time step
-                         = sum( j_EC_G [molC/molV/h] * M_Vt [molV] )
-
-The difference in these values would be the C used for maintenance, which is mostly released as respiration. 
-
-
-Next step is to figure out how to estimate change in DIC from the output data, along with a measure of total plant size. This would include using below-bulb stype diameter to estimate stipe mass, plus some number of fronds to multiply by the growth value. (These fronds will need to be shed at some rate ... see Canvin et al. 2024).
+Next step is to examine the version of this model parameterised for Nereo. This tasks is pending with Barbosa, and may be completed by mid 2025. Along with this it will be necessary to estimate total plant size from frong growth. This would include using below-bulb stype diameter to estimate stipe mass, plus some number of fronds to multiply by the growth value. (These fronds will need to be shed at some rate ... see Canvin et al. (2024).
 
 Can we assume that the growth of the entire plant follows the growth rate of a blade? Not exactly according to Pontier et al. 2024.
-
-
-## Values from elsewhere
-ChatGPT says:  
-- A mature bull kelp (*Nereocystis luetkeana*) plant can have 30 - 50 blades  
-- The stipe usually makes up around 20-40% of the total biomass, depending on age and growth stage, season, and environmental factors.  
-- A new sporophyte is typically a few mm to cm in length, and a few to 10s of mg (dry weight).  
 
 # References
 
 Evans et al. 2015. Tracking Ocean Acidification in an Alaskan Shellfish Hatchery, PLoS One, 10, e0130384,
 https://doi.org/10.1371/journal.pone.0130384.
 
+
+# Latex to PDF formatting notes
+
+The concentration is $10^3$ µmol/m$^3$.
+
+\[
+x = a^2 + b^2
+\]
 
 
 Fin.

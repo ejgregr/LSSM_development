@@ -9,7 +9,7 @@
 #================================== Load require packages =================================
 # check for any required packages that aren't installed and install them
 required.packages <- c( "ggplot2", "reshape2", "lubridate", "dplyr", "stringr",
-                        "rmarkdown","knitr", "tinytex", # "kableExtra", currently causing trouble.
+                        "rmarkdown","knitr", "tinytex", "kableExtra", #currently causing trouble.
                         "seacarb", "gsw", "truncnorm")
 
 # Other packages that might be useful. 
@@ -38,6 +38,7 @@ r_max       <- 0.065  # Maximum daily growth rate, assuming 6 month growth and m
 
 data_dir <- "C:/Data/Git/LSSM_development/Data"
 DEB_dir  <- "C:/Data/Git/LSSM_development/DEB"
+PDF_dir  <- "C:/Data/Git/LSSM_development/PDF" # for Markdown script
 
 # Growth period
 # Dates set to match 2023 BATI mooring data
