@@ -1,0 +1,7 @@
+BoxName,DIC,ALK,SALT,TEMP,O2
+GK_shore,,,,,
+GK,"These are time series. Means their values affect, or are affected by, model configuration.",,,,
+KI_M,Model runs on tidal cycles - which should work well with an hourly growth model! ,,,,
+KI_F,"This implies that start and end times need to be imposed, rather than taken from the data. ",,,,
+JS_M,So need to create tidal timeseries from user start and end dates for each of the active climate variables. ,,,,
+QCS,,,,,

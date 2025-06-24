@@ -54,6 +54,8 @@ source( "LSSM_chemistry.R" )
 # then run >tinytex::install_tinytex()
 # ... and done. 
 
+Sys.setenv(TEXLIVE_AUTO_UPDATE = "0")
+
 today <- format(Sys.Date(), "%Y-%m-%d")
 
 rmarkdown::render( "LSSM_documentation.Rmd",   

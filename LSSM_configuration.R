@@ -32,10 +32,6 @@ version$version.string
 latitude  <- 49.2827   # Vancouver's latitude
 longitude <- -123.1207 # Vancouver's longitude
 
-B_init      <- 0.025  # Initial mass of sporophyte (est. at 25 mg based on ChatGPT)
-B_max       <- 9.23   # Max biomass for an adult Nereo. Calculated from field results (Weigel and Pfister 2021)
-r_max       <- 0.065  # Maximum daily growth rate, assuming 6 month growth and mature plant is 9.23 kg 
-
 data_dir <- "C:/Data/Git/LSSM_development/Data"
 DEB_dir  <- "C:/Data/Git/LSSM_development/DEB"
 PDF_dir  <- "C:/Data/Git/LSSM_development/PDF" # for Markdown script
@@ -84,8 +80,6 @@ ounits <- list( sizeu = 'ha',
                 POCu  = 'g/m3',
                 NOXu  = 'g/m3',
                 ph    = 'pH')
-
-
 
 #==== Functions ====
 

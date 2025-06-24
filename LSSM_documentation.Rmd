@@ -5,7 +5,8 @@ date: "Last update: `r format(Sys.Date(), '%B %d, %Y')`"
 output:
   pdf_document:
     keep_tex: true       # Keep intermediate LaTeX file for troubleshooting
-    latex_engine: pdflatex # Specify the LaTeX engine (pdflatex, xelatex, or lualatex). This renders the pdf
+#    latex_engine: pdflatex # Specify the LaTeX engine (pdflatex, xelatex, or lualatex). This renders the pdf
+    latex_engine: xelatex
     number_sections: true # Optional, if you want numbered sections
     toc: true             # Table of contents (optional)
     toc_depth: 3          # Show 3 level headings
@@ -17,6 +18,13 @@ header-includes:
   - \usepackage{tocloft}
   - \usepackage{float} # for controlling placement of tables and figures
   - \usepackage{placeins} # for a cmd to keep text in place.
+  - \usepackage{array}
+  - \usepackage{ragged2e}
+#  - \usepackage{graphicx}
+#  - \usepackage{xcolor}
+#  - \usepackage{longtable}
+#  - \usepackage{pdflscape}
+  
   - \setlength{\intextsep}{5pt} % Vertical space above & below [h] floats
   - \setlength{\textfloatsep}{5pt} % Vertical space below (above) [t] ([b]) floats
   - \setlength{\abovecaptionskip}{10pt}
@@ -48,6 +56,48 @@ To understand how kelp growth my influence ocean acidification, we needed to sta
 ```{r fig:external_image, echo=FALSE, fig.cap="Study area showing field sites and historic BATI and MaPP moorings", fig.align="center", out.width="100%", fig.pos="H"}
 knitr::include_graphics("D:/Dropbox/Scitech/Broughton/Broughton_2025.png")
 ```
+
+\newpage
+\begin{landscape}
+
+```{r datasource-table, echo=FALSE, results='asis'}
+# do we need this here if declared earlier? Don't think so. 
+#library(knitr)
+#library(kableExtra)
+
+# Data frame
+data_sources <- data.frame(
+  Variable = c("Tide height", "pCO2", "Temperature", "Salinity", "DIC", "Kelp growth"),
+  Source   = c("cedar_island_tides.csv", "ferry_pCO2.csv", "BATI_mooring_temp.csv", "BATI_mooring_sal.csv", "BKW", "BKW"),
+  Period = c("2020/01-2025/12", "", "2024/05-2024/09", "2024/05-2024/09", "2025/04-2025/09", "2025/04-2025/09"),
+  Resolution = c("hourly", "2-5 days", "hourly", "hourly", "7-14 days", "hourly"),
+  Units = c("metres", "µatm", "°C", "PSU", "µmol/kg", "kg"),  
+  Notes = c("From CHS. Need a daily metric from which can inver daily tidal mixing.",
+    "From the AK ferry data. Used as a proxy for box QCS during PoC development.",
+    "2024 data from several locations, presumed useful for helping interpolate the 2025 BTW survey data.",
+    "Used for boundaries/interior; aligns with model; quality controlled.",
+    "Derived from pCO2, T, S via seacarb; used as tracer; aligns to model.", 
+    "")
+  )
+
+data_sources$Source <- gsub("_", "\\_", data_sources$Source)
+colnames(data_sources) <- gsub("_", " ", colnames(data_sources))
+
+kable(data_sources, format="latex", , booktabs = TRUE, 
+      caption = "Data Sources used in the Box Model")  %>% 
+  # fornmat column widths
+  column_spec(1, width = "8em") %>%
+  column_spec(2, width = "13em") %>%
+  column_spec(3, width = "10em") %>%
+  column_spec(4, width = "6em") %>%
+  column_spec(5, width = "6em") %>%
+  column_spec(6, width = "35em") %>%
+  column_spec(6, latex_column_spec = "p{4in}") %>%
+
+  kableExtra::kable_styling(latex_options = c("hold_position", "scale_down"))
+
+```
+\end{landscape}
 
 ### Temperature and salinity
 BATI has 2023 data from 8 moorings in the region. Main ones of interest to this project are B5, in Blackfish Sound, and B7, in a sheltered location west of Gilford Island. The BATI moorings include a variety of sensors at different depths: 0.5 m = StarOddi CTD (T/S); 1.5 and 3 m = Hobo (T and Light); Bottom = T (Hobo). These data have been processed by Romina into a workable file of surface T/S (ctd_surface_cond_moorings2023.csv). T at depth from the Hobo sensors are contained in a separate file. 
@@ -186,16 +236,54 @@ We began with a 1-dimensional plant model. This quickly highlighted the need to 
 - [for now! :] No internal feedbacks (e.g., biogeochemistry altering mixing)  
 - External inputs are exogenous and time-varying (not coupled to internal state)  
 
-### Model structure and spatial configuration
-We constructed a two-layer estuarine box model comprising 6 to 9 horizontally aligned segments, each divided into a surface and bottom layer. This configuration captures both longitudinal gradients (e.g., salinity intrusion) and vertical stratification. Box boundaries were defined based on known geomorphic or hydrodynamic features such as the estuary mouth, mid-estuary transition zones, and freshwater inflow regions. Each box was assumed to be internally well-mixed. Table 1 summarizes the structural properties of each box, including depth and volume.
-
 ### Physical state variables and properties
 Each box tracks time-dependent physical state variables relevant to estuarine stratification and mixing: temperature (T, in C), salinity (S, in PSU), and water density (rho, in kg/m³), with density calculated at each time step using the UNESCO equation of state (rho = f(T, S)). These variables formed the basis for resolving both horizontal and vertical exchange dynamics. Optionally, additional state variables such as dissolved oxygen, dissolved inorganic carbon (DIC), or nutrients (e.g., nitrate, phosphate) could be included, depending on the modeling objectives. The model also allowed for the calculation of light attenuation, vertical density gradients, and buoyancy frequencies to inform stability and mixing thresholds.
+
+### Model structure and spatial configuration
+For the proof-of-concept, we created a two-layer estuarine box model comprising 3 interior and 3 boundary boxes, each divided into a surface and bottom layer. This configuration allowed us to explore the mixing between the G!o'gwade basin, it's intertidal, and the adjacent, mixed waters of Knight Inlet. Box boundaries were defined according to bathymetry, and assumed hydrodynamics around mixing within and adjacent to G!o'gwade Damski. Table 1 summarizes the structural properties of each box, including depth and volume.
+
+```{r, BoxVolumeTable, echo=FALSE, results='asis', escape=FALSE}
+name_table <- data.frame( 
+  Box_name = c("G!o'gwade Shore", "G!o'gwade Basin", "Knight Inlet - mixed", "Knight Inlet - fresh", "Johnstone Strait - mixed", "Queen Charlotte Strait"),
+  Box_code <- c("GK_shore", "GK", "KI_M", "KI_F", "JS_M", "QCS"),
+  Box_type <- c("Internal", "Internal", "Internal", "Boundary", "Boundary", "Boundary"))
+  
+  #...  Table should be made from what is loaded ... 
+        
+kable(name_table, format = "latex", booktabs = TRUE, 
+  caption = "Box model physical structure") %>%
+  column_spec(3, latex_column_spec = "p{4in}") %>% 
+  kable_styling(latex_options = c("hold_position"))
+```
+
+
 
 ### Exchange between boxes
 Horizontal exchanges include advection and dispersion. Advection describes bulk water movement (e.g., freshwater inflow, tidal exchange), while dispersion refers to tidal and wind-driven mixing across horizontal gradients. 
 
 Vertical exchanges include Wind-driven vertical mixing and buoyancy suppression from stratification. These are modeled with a vertical diffusivity coefficient (K<sub>z</sub>), and are governed by advection-diffusion equations with mass balance over each box.  
+
+<!-- ```{r, BoxFlowTable, echo=FALSE, results='asis', escape=FALSE}
+name_table <- data.frame( )
+
+#  ...  Table should be made from what is loaded ... 
+
+#  GK        = 0,   # weak stratification
+#  GK_shore  = 0.9,   # shallow, well-mixed
+##  KK        = 0.1,   # weak stratification
+##  KK_shore  = .9,   # shallow, well-mixed
+#  KI_M      = 0.02,  # turbulent, moderate mixing
+#  JS_M      = 0.02,  # turbulent, moderate mixing
+#  QCS       = 0.005, # deep, well stratified
+#  KI_M      = 0.005  # well stratified, density-based
+
+        
+kable(name_table, format = "latex", booktabs = TRUE, 
+  caption = "Box model flow rates") %>%
+  column_spec(3, latex_column_spec = "p{4in}") %>% 
+  kable_styling(latex_options = c("hold_position"))
+```
+-->
 
 ### Boundary conditions and external forcing
 These apply time-varying inputs at the horizontal boundaries of the model and from the atmosphere. They should vary seasonally to simulate stratification and turnover. They can include:  

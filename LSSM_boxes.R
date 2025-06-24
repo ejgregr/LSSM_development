@@ -26,21 +26,18 @@ source( "LSSM_box_functions.R" )
 box_dir <- "C:/Data/Git/LSSM_development/Boxes"
 
 # Load configuration files (flow matrix and box volumes)
-flow_df   <- read.csv( paste(box_dir, "flow_matrix.csv", sep="/"), stringsAsFactors = FALSE)
-volume_df <- read.csv( paste(box_dir, "box_volumes.csv", sep="/"))
+volume_df  <- read.csv( paste(box_dir, "box_volumes.csv", sep="/"), stringsAsFactors = FALSE)
+flow_df    <- read.csv( paste(box_dir, "flow_matrix_active.csv", sep="/"), stringsAsFactors = FALSE)
+#climate_df <- read.csv( paste(box_dir, "box_climate.csv", sep="/"), stringsAsFactors = FALSE)
 
-# Get box names and number; create an index
+# Get box names and details; create an index
 boxes <- volume_df$BoxName
 n_boxes <- length(boxes)
 box_index <- setNames(seq_along(boxes), boxes)
 
 # identify internal and boundary boxes
-iboxes <- c("KK", "KK_shore", "M_KI")
-bboxes <- c("QCS", "M_JS", "F_KI")
-
-# Assign fixed values for DIC to bboxes
-fixed_surf_conc <- c(QCS = 2250, M_JS = 2200, F_KI = 1900)
-fixed_bot_conc  <- c(QCS = 2280, M_JS = 2300, F_KI = 2000)
+iboxes <- boxes[ volume_df$BoxType =="internal" ]
+bboxes <- boxes[ volume_df$BoxType =="boundary" ]
 
 # Create volume vectors 
 vol_surf <- setNames(volume_df$SurfaceVolume_m3, volume_df$BoxName)[boxes]
@@ -58,29 +55,54 @@ ebb_bot    <- x$ebb_bot
 flood_surf <- x$flood_surf
 flood_bot  <- x$flood_bot
 
-# Add vertical mixing within boxes
-alpha_mix <- c(
-  KK        = 0.1,   # weak stratification
-  KK_shore  = .9,   # shallow, well-mixed
-  M_KI      = 0.02,  # turbulent, moderate mixing
-  M_JS      = 0.02,  # turbulent, moderate mixing
-  QCS       = 0.005, # deep, well stratified
-  F_KI      = 0.005  # well stratified, density-based
-)
+# Need some time. 
+n_steps <- 150  # total tidal cycles (e.g., ~50 days)
 
-# Initialise concentration arrays
-n_steps <- 100  # total tidal cycles (e.g., 50 days)
+
+# Load vertical mixing constants for boxes
+alpha_mix <- setNames(volume_df$VerticalMixing, volume_df$BoxName)
+
+
+#---- Initialise DIC concentration arrays ----
+
+# Assign fixed values for DIC to boundary boxes
+# Drop 2 oceanic boundaries by 100 ... 
+fixed_surf_conc <- c(QCS = 2100, JS_M = 2000, KI_F = 1800)
+fixed_bot_conc  <- c(QCS = 2150, JS_M = 2100, KI_F = 1900)
+
+
 
 # Initialise tracer matrices (DIC example)
 conc_surf <- matrix(NA, nrow = n_boxes, ncol = n_steps, dimnames = list(boxes, NULL))
 conc_bot  <- matrix(NA, nrow = n_boxes, ncol = n_steps, dimnames = list(boxes, NULL))
 
+### DIC HERE FOR BBOXES SHOULD BE SET TO FIXED VALUES ABOVE
 # Example initial DIC conditions (µmol/kg)
-conc_surf[, 1] <- c(2100, 2000, 2150, 2200, 2250, 1900)[match(boxes, boxes)]
-conc_bot[, 1]  <- c(2200, 2000, 2180, 2300, 2280, 2000)[match(boxes, boxes)]
+# Box order:      GK_Shore, GK, KI_M, KI_F, JS_M, QCS
+conc_surf[, 1] <- c(1900, 1950, 2000, 1800, 2100, 2200 )[match(boxes, boxes)]
+conc_bot[, 1]  <- c(1920, 1970, 2020, 1900, 2200, 2250 )[match(boxes, boxes)]
 
+# Grow some kelp for the KK_shore box
+kelp_params <- data.frame(
+  N_plants = 1000000,
+  B_init = 0.025,
+  B_max = 9.23,
+  R_max = 0.065,
+  wet_to_dry = 0.13,
+  dry_to_C = 0.25
+)
 
+kelp_uptake_vector <- generate_kelp_DIC_uptake(kelp_params, day_stamps)
+dim(kelp_uptake_vector )
+head(kelp_uptake_vector)
+#plot(kelp_uptake$B_plant)
+
+cum_DIC_loss <- cumsum(kelp_uptake_vector$DIC_uptake_mol)
+sum( cum_DIC_loss )
+
+###########################
 #---- Simulation loop ----
+
 for (t in 2:n_steps) {
   # Choose ebb or flood
   if (t %% 2 == 0) {
@@ -116,42 +138,24 @@ for (t in 2:n_steps) {
       vol_bot = vol_bot,
       alpha_mix = alpha_mix
     )
-    
-  # for (j in boxes) {
-  #   if (vol_surf[j] > 0 && vol_bot[j] > 0) {
-  #     
-  #     # Lookup box-specific alpha
-  #     alpha <- alpha_mix[j]
-  # 
-  #     # Masses in each layer
-  #     mass_s <- conc_surf[j, t] * vol_surf[j]
-  #     mass_b <- conc_bot[j, t]  * vol_bot[j]
-  # 
-  #     # Exchange between layers
-  #     delta_s_to_b <- alpha * mass_s
-  #     delta_b_to_s <- alpha * mass_b
-  # 
-  #     # Update masses
-  #     mass_s_new <- mass_s - delta_s_to_b + delta_b_to_s
-  #     mass_b_new <- mass_b - delta_b_to_s + delta_s_to_b
-  # 
-  #     # Convert to concentration
-  #     conc_surf[j, t] <- mass_s_new / vol_surf[j]
-  #     conc_bot[j, t]  <- mass_b_new / vol_bot[j]
-  #   }
-  # }
-    
     conc_surf[j, t] <- mix$conc_surf
     conc_bot[j, t]  <- mix$conc_bot
   }
   
-  
+  # Kelp drawdown in KK_shore during update
+  if ("GK_shore" %in% boxes) {
+    # mol → µmol/kg
+    loss_umol_kg <- kelp_uptake_vector$DIC_uptake_mol[t] * 1e6 / vol_surf["GK_shore"]
+    conc_surf["GK_shore", t] <- conc_surf["GK_shore", t] - loss_umol_kg
+  }
   
   # Reset boundary conditions
   conc_surf[bboxes, t] <- fixed_surf_conc[bboxes]
   conc_bot[bboxes, t]  <- fixed_bot_conc[bboxes]
+  
 }
 
+conc_surf
 
 #----- Troubleshooting
 # sum(flood_surf)
@@ -181,5 +185,5 @@ matplot(t(conc_bot[all_boxes, ]), type = 'l', lty = line_types, col = colors,
         main = "Bottom Layer Tracer Concentration", xlab = "Time step", ylab = "µmol/kg")
 legend("topright", legend = all_boxes, col = colors, lty = line_types, bty = "n")
 
-
+# plot( kelp_uptake_vector$DIC_uptake_mol )
 ### Fin

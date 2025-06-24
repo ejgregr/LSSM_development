@@ -6,7 +6,42 @@
 # 2025/xx/xx: 
 #################################################################################
 
+### Box model configuration
 
+# Growth period
+# Dates set to match 2023 BATI mooring data
+start_date <- as.POSIXct("2023-05-03 16:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
+end_date   <- as.POSIXct("2023-09-29 23:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
+
+day_stamps <- seq(from = start_date, to = end_date, by = "day")
+
+
+
+#################################################################################
+### Box functions
+
+generate_kelp_DIC_uptake <- function(params, days) {
+  
+  n_days <- length(days)
+  
+  with(params, {
+    # Logistic biomass curve (kg wet per plant)
+    B_t <- B_max / (1 + ((B_max - B_init) / B_init) * exp(-R_max * seq_len(n_days)))
+    
+    # Daily biomass gain (wet weight)
+    delta_B <- c(0, diff(B_t))  # kg wet per day per plant
+    
+    # Convert to mol C (DIC) uptake per day
+    DIC_uptake_mol <- delta_B * wet_to_dry * dry_to_C * N_plants
+    
+    data.frame(
+      date = days,
+      B_plant = B_t,
+      delta_B = delta_B,
+      DIC_uptake_mol = DIC_uptake_mol
+    )
+  })
+}
 
 applyVerticalMixing <- function(box, conc_surf, conc_bot, vol_surf, vol_bot, alpha_mix) {
   # Skip if either layer has zero volume
@@ -35,8 +70,6 @@ applyVerticalMixing <- function(box, conc_surf, conc_bot, vol_surf, vol_bot, alp
   
   return(list(conc_surf = conc_s, conc_bot = conc_b))
 }
-
-
 
 populateFlowMatrices <- function(){
   # Populate flow matrices
@@ -68,3 +101,7 @@ populateFlowMatrices <- function(){
     flood_bot = flood_bot
   ))
 }
+
+
+
+# Fin
