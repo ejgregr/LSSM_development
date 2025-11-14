@@ -10,7 +10,8 @@
 # 
 # ## Updates: 
 # 2025/01/24: Earlier DEB code now moved to bottom of this script.
-#
+# 2025/11/13: This is now largely superceded EXCEPT for the CODE linking to Matlab DEB model
+#   (which Romina told me in spring 2025 she has re-written in R)
 #################################################################################
 
 #----- Working with the simple PARAMETRIC model of growth  --------

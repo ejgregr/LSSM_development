@@ -72,7 +72,7 @@ data_sources <- data.frame(
   Period = c("2020/01-2025/12", "", "2024/05-2024/09", "2024/05-2024/09", "2025/04-2025/09", "2025/04-2025/09"),
   Resolution = c("hourly", "2-5 days", "hourly", "hourly", "7-14 days", "hourly"),
   Units = c("metres", "µatm", "°C", "PSU", "µmol/kg", "kg"),  
-  Notes = c("From CHS. Need a daily metric from which can inver daily tidal mixing.",
+  Notes = c("From CHS. Need a daily metric from which can infer daily tidal mixing.",
     "From the AK ferry data. Used as a proxy for box QCS during PoC development.",
     "2024 data from several locations, presumed useful for helping interpolate the 2025 BTW survey data.",
     "Used for boundaries/interior; aligns with model; quality controlled.",
@@ -109,12 +109,12 @@ Environmental button loggers (T only) are distributed around the region and have
 ### Light
 Light data from the Hobos are challenging because the sensors foul up, and thus require regular cleaning. The data are available but need to be cleaned for the attenuation of light levels due to fouling. An algorithmic approach would seem to be warranted, along with a decision of when and whether to cull or correct the data. This work is pending, thus the light measurements are unlikely to be available for this work. 
 
-We therefore simulated a Daily Light Integral (DLI) for our proof-of-concept model. DLI is a measure of the total amount of photosynthetically active radiation (PAR) received over a day. We first calculate PAR in units of *(µmol photons m$^{-2}$ s$^{-2}$)*. PER HOUR? This was developed with support from ChatGPT. The photoperiod is simulated hourly for a year to match the DEB. DLI is related to PAR as (PARavg X photoperiod / 10$^6$). So in our case, we just need to daily averages over 10$^6$ (things coverts µmoles to moles giving DLI in *(µmol photons m$^2$ day$^{-1}$*).
+We therefore simulated a Daily Light Integral (DLI) for our proof-of-concept model. DLI is a measure of the total amount of photosynthetically active radiation (PAR) received over a day. We first calculate PAR in units of *(µmol photons m$^{-2}$ s$^{-2}$)*. PER HOUR? This was developed with support from ChatGPT. The photoperiod is simulated hourly for a year to match the DEB. DLI is related to PAR as (PARavg X photoperiod / 10$^6$). So in our case, we just need daily averages over 10$^6$ (things converts µmoles to moles giving DLI in *(µmol photons m$^2$ day$^{-1}$*).
 
 **Currently can't match Pontier's DLI values without a fudge factor. Check PAR function first.**
 
 ### Alkalinity
-Alkalinity is needed to calculate pH. Fortunately, it has a strong relationship with salinity. BATI moorings have salinity, so can get TA from salinity relationship. THis has been derived by Evans for various locations in the eastern Pacific. For example:
+Alkalinity is needed to calculate pH. Fortunately, it has a strong relationship with salinity. BATI moorings have salinity, so can get TA from salinity relationship. This has been derived by Evans for various locations in the eastern Pacific. For example:
 
 \tab TA = 48.771 * S + 606.23 $\mu{mol}/kg^{-1}$ (Evans et al. 2015, for SE Ak)  
 \tab TA = 59.88  * S + 278.79 $\mu{mol}/kg^{-1}$ (Evans et al. 2019, for the Northern Salish Sea)  
@@ -124,7 +124,7 @@ The fit is tight (r$^2$ = 0.94, root mean square error = 17.21 $\mu{mol}/kg^{-1}
 ### Ocean carbon 
 For our proof-of-concept model, we obtained pCO$_2$ measures from the Alaska Marine Highway System M/V Columbia during 135 service route transits between October 2017 and October 2019. 
 
-We collected near-continuous measurements of pCO$_2$ along with ancillary measurements of temperature and salinity using two moorings. We also obtained direct measurements of pCO2, total DIC (or TCO2), and salinity from Water samples collected across time and space (see Figure X). Underway surface water measurements were collected from The vessel sailed south from Ketchikan every Wednesday, arrived in Bellingham on Friday, returned to Ketchikan on Sunday. Measurements of temperature, salinity, dissolved oxygen content, and CO$_2$ partial pressure were made every 2 mins on seawater drawn into the vessel from a ~2 m intake. A subset of these data were extracted for the southeastern portion of Queen Charlotte Strait, adjacent to our area of interest (i.e., between 50.6 and 50.7N, and -126.7 and -126.8W). This yielded 676 time stamped records that included T, S, and several different pCO$_2$ measures. These data formed the basis of our ambient, or kelp-unaffected water.   
+We collected near-continuous measurements of pCO$_2$ along with ancillary measurements of temperature, salinity, and dissolved oxygen at two moorings. We also obtained direct measurements of pCO2, total DIC (or TCO2), and salinity from Water samples collected across time and space (see Figure X). Underway surface water measurements were collected as the Columbia sailed south from Ketchikan every Wednesday, arrived in Bellingham on Friday, returned to Ketchikan on Sunday. Measurements of temperature, salinity, dissolved oxygen content, and CO$_2$ partial pressure were made every 2 mins on seawater drawn into the vessel from a ~2 m intake. A subset of these data were extracted for the southeastern portion of Queen Charlotte Strait, adjacent to our area of interest (i.e., between 50.6 and 50.7N, and -126.7 and -126.8W). This yielded 676 time stamped records that included T, S, and several different pCO$_2$ measures. These data formed the basis of our ambient, or kelp-unaffected water. We selected the value identified as "Surface Partial Pressure of Carbon Dioxide in Sea Water at Sea Surface Temperature" (SW_pCO2_wet_SST) for the proof-of-concept pCO$_2$.  
 
 Sample data for model development taken from Alaska ferry data. Accessible here:  
 https://catalogue.hakai.org/erddap/tabledap/HakaiColumbiaFerryResearch.html

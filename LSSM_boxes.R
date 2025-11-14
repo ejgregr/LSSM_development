@@ -6,8 +6,9 @@
 # movement of DIC from kelp forests to the broader Broughton region. 
 
 # ## Updates: 
-# 2025/06/09: A working 12-box tracer model now does vertical exchange between surface and deep waters, 
-#   and horizontal exchange between Klukuane, its nearshore, and its 3 main connections to the outside.
+# 2025/06/09: A working 12-box tracer model (6 horizontal x 2 vertical) now does 
+#   vertical exchange between surface and deep waters, and horizontal exchange between 
+#   Village Sea, its nearshore, and its 3 main connections to the outside.
 #   It also allows for freshwater effects from Knight Inlet. 
 #   Runs on estimates of volume, tracer (e.g., DIC) concentrations, and flow matrices between the boxes.
 
@@ -185,5 +186,10 @@ matplot(t(conc_bot[all_boxes, ]), type = 'l', lty = line_types, col = colors,
         main = "Bottom Layer Tracer Concentration", xlab = "Time step", ylab = "µmol/kg")
 legend("topright", legend = all_boxes, col = colors, lty = line_types, bty = "n")
 
-# plot( kelp_uptake_vector$DIC_uptake_mol )
+
+#plot( kelp_uptake_vector$DIC_uptake_mol )
+
+
+
+
 ### Fin
