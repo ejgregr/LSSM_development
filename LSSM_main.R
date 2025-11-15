@@ -114,36 +114,36 @@ daily_ocean <- data.frame( 'days'   = dBATI5$date,
                            'totAlk' = daily_TA$B5 )
 
 head(daily_ocean, 10)
+
+
 #---- Part 2 Grow a kelp plant during main growing season (MAY to SEPT) ----
 # Go with BATI5 mooring as that's closer to the carbon data from the Columbia
 
+# Load growth function, with light and temp inhibitions, and a plotting function.
+source( "LSSM_DEB.R" )
+
+#Notes: Fronds have to grow faster than stipe for stipe to reach cap (i.e., max fraction)
+kelp_grow <- grow_kelp4(daily_ocean )
 
 
+dev.off()
+FullKelpPlot( kelp_grow )
 
-# Includes:
-#   1) A simple Parametric model based on literature using simple logistic growth
-#   2) Example using an unparameterised version of DEB.  
-# Also exploring temperature and light inhibition factors.
-source( "LSSM_growth.R" )
+# Examine growth inhibitors
+matplot(kelp_grow$days[-1], kelp_grow[-1,c("fT","fL")], type="l", lwd=2,
+        col=c("red","blue"), ylab="Modifier (0–1)", xlab="Date")
+legend("topright", legend=c("Temp limit","Light limit"),
+       col=c("red","blue"), lty=1, lwd=2)
 
-# Growth period (from LSSM_growth.R)
-# Dates set to match 2023 BATI mooring data
-start_date <- as.POSIXct("2023-05-03 16:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
-end_date   <- as.POSIXct("2023-09-29 23:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
-hour_stamps <- seq(from = start_date, to = end_date, by = "hour")
-# KLUDGE: Shortening hour_stamps by 1h. 
-hour_stamps <- hour_stamps[-length(hour_stamps)]
 
-# Create compatible x-axis labels
-day_stamps <- hour_stamps %>%
-  as.Date() %>%                                          # Convert timestamps to Date
-  unique() %>%                                           # Get unique dates
-  .[. >= as.Date(start_date) &  . <= as.Date(end_date)]  # Filter dates within the range
-day_stamps <- as.Date( day_stamps )
-day_stamps <- day_stamps[-length(day_stamps)] # KLUDGE to get 150 days
+names( kelp_grow )
+range( kelp_grow$days )
 
-#difftime(end_date, start_date, units = "days")
 
+plot( as.Date(kelp_grow$days), kelp_grow$B_kgWW,
+      type = "l", lwd = 3, col = "darkgreen",
+      xlab = "Date", ylab = "Biomass (kg wW)",
+      main = "Nereocystis Biomass Dynamics")
 
 
 #---- Part 3: Calculate chemistry changes during  growing season ----

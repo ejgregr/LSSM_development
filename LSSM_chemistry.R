@@ -66,11 +66,11 @@ csalt <- CalcAlk( ak_dat$Smn )
 columbia_carb <- carb( flag_CA, var1=ak_dat$CO2mn , var2=csalt,
                    S=ak_dat$Smn, T=ak_dat$Tmn )
 
+# Plot Columbia-based pH vs. daily_ocean data 
 dev.off()
 par( cex = 1.3)
 plot( x=daily_ocean$days, y=oceanCarb$pH, type='l', xlab='', ylab='pH', main = x)
 points( ak_dat$date, y=columbia_carb$pH, pch = 21, bg = "black")
-
 
 
 #---- Now thinking about volume effects ----

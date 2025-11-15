@@ -14,7 +14,6 @@ library(seacarb)
 #      day, T, S, TA, DIC_with_kelp, pH_with_kelp, pH_no_kelp
 # ---------------------------------------------------------
 
-
 flag_CA <- 24 # pCO2 and Alkalinity 
 flag_CD <- 25 # pCO2 and DIC  
 flag_AD <- 15 # Alkalinity and DIC 
@@ -22,16 +21,17 @@ flag_AD <- 15 # Alkalinity and DIC
 result <- simulate_kelp_pH(
   daily_ocean = daily_ocean,
   kelp_grow   = kelp_grow,
-  volume_kg   = 50   # choose any water volume
+  volume_kg   = 1,   # choose any water volume
+  C_frac = 0.33
 )
 
+head(result)
 tail(result)
-
 
 
 simulate_kelp_pH <- function(daily_ocean, kelp_grow,
                              volume_kg,
-                             C_frac = 0.33) {
+                             C_frac = 0.25) {
   
   stopifnot(all(daily_ocean$days == kelp_grow$days))
   n <- nrow(daily_ocean)
