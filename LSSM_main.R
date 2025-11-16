@@ -125,8 +125,10 @@ source( "LSSM_DEB.R" )
 #Notes: Fronds have to grow faster than stipe for stipe to reach cap (i.e., max fraction)
 kelp_grow <- grow_kelp4(daily_ocean )
 
+#write.csv(kelp_grow, paste0( DEB_dir, "/kelp_grow_Nov15.csv"), row.names = FALSE)
 
-dev.off()
+
+par(mfrow=c(1,1))
 FullKelpPlot( kelp_grow )
 
 # Examine growth inhibitors
@@ -148,6 +150,11 @@ plot( as.Date(kelp_grow$days), kelp_grow$B_kgWW,
 
 #---- Part 3: Calculate chemistry changes during  growing season ----
 source( "LSSM_chemistry.R" )
+
+
+
+
+
 
 
 #---- Knit and render Markdown file to PDF -----

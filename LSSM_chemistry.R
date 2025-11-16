@@ -60,6 +60,9 @@ plot( x=daily_ocean$days, y=oceanCarb$DIC, type='l', xlab='', ylab='DIC (mol/kg)
 par(mar=c(3,4,1,1) ) 
 plot( x=daily_ocean$days, y=oceanCarb$pH, type='l', xlab='', ylab='pH')
 
+#reset graphic layout 
+par(mfcol = c(1,1))
+
 # Compare pH using salinity (alkalinity), and temperature directly from the Columbia
 x <- "Comparing pH from assembled ocean data (line) to MV Columbia sensor data (points)" 
 csalt <- CalcAlk( ak_dat$Smn )
@@ -67,8 +70,7 @@ columbia_carb <- carb( flag_CA, var1=ak_dat$CO2mn , var2=csalt,
                    S=ak_dat$Smn, T=ak_dat$Tmn )
 
 # Plot Columbia-based pH vs. daily_ocean data 
-dev.off()
-par( cex = 1.3)
+par( cex = 1.3) # suitable for cut/pste to ppt
 plot( x=daily_ocean$days, y=oceanCarb$pH, type='l', xlab='', ylab='pH', main = x)
 points( ak_dat$date, y=columbia_carb$pH, pch = 21, bg = "black")
 
@@ -83,10 +85,9 @@ amb_ph  <- oceanCarb$pH
 kmod_ph <- carb( flag_AD, var1=oceanCarb$ALK, var2=(oceanCarb$DIC-molDIC_fixed),
                  S=oceanCarb$S, T=oceanCarb$T)$pH
 
-dev.off()
 plot( daily_ocean$days, xlab="", ylab="pH",
-      kmod_ph, type='l', col='green', main='Daily change in pH in 1 m² of water')
-lines( daily_ocean$days, amb_ph, type='l', col='red' )
+      kmod_ph, type='l', col='green', main='Daily change in pH in 1 kg of water', lwd=2)
+lines( daily_ocean$days, amb_ph, type='l', col='red', lwd=2 )
 legend("topleft", legend = c("Ambient", "Kelp-affected"), col = c("red", "green"), lwd = 2)
 
 # Above used to have more of an effect over time. Likely wrong given this:
@@ -105,7 +106,7 @@ plot( amb_ph - kmod_ph )
 #---- Calculate effect of kelp growth on different water volumes -----
 
 # Volumes in litres / kg of water to iterate over
-volumes <- c(1, 10, 50, 100, 1000)
+volumes <- c(1, 10, 50, 100)
 
 # This is the 'ambient' ocean conditions that we will use based on BATI5 and Ak ferry
 ambient_data <- oceanCarb
@@ -132,7 +133,6 @@ for(i in 1:length(volumes)) {
   adjusted_chem[[i]] <- chem_out
 }
 
-
 # combine the results in a single dataframe, add a day of year column too
 # NB: This dataframe is essentially 160 days * # of water mass levels long - for ggplot()
 
@@ -156,12 +156,16 @@ ggplot(final_df) +
   geom_line(aes(x = DoY_num,
                 y = delta_pH,
                 colour = factor(Volume_kg),
-                group = Volume_kg)) +
+                group = Volume_kg),
+            size = 1.05) +
   theme_light() +
   labs(
     x = "Day of Year",
     colour = "Volume (kg)"
   )
+
+
+
 
 
 

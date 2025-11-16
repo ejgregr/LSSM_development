@@ -3,17 +3,8 @@
 # Created: June 3, 2025. EJG
 # functions to support the box model
 # ## Updates: 
-# 2025/xx/xx: 
+# 2025/11/15: Revising as part of 2nd pass thru
 #################################################################################
-
-### Box model configuration
-
-# Growth period
-# Dates set to match 2023 BATI mooring data
-start_date <- as.POSIXct("2023-05-03 16:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
-end_date   <- as.POSIXct("2023-09-29 23:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")
-
-day_stamps <- seq(from = start_date, to = end_date, by = "day")
 
 
 

@@ -25,6 +25,13 @@ source( "LSSM_box_functions.R" )
 
 #---- Constants and global variables ----
 box_dir <- "C:/Data/Git/LSSM_development/Boxes"
+DEB_dir  <- "C:/Data/Git/LSSM_development/DEB"
+
+
+kelp_grow <- read.csv(paste0( DEB_dir, "/kelp_grow_Nov15.csv") )
+
+
+
 
 # Load configuration files (flow matrix and box volumes)
 volume_df  <- read.csv( paste(box_dir, "box_volumes.csv", sep="/"), stringsAsFactors = FALSE)
@@ -93,13 +100,17 @@ kelp_params <- data.frame(
   dry_to_C = 0.25
 )
 
-kelp_uptake_vector <- generate_kelp_DIC_uptake(kelp_params, day_stamps)
+
+
+kelp_uptake_vector <- generate_kelp_DIC_uptake(kelp_params, kelp_grow$days)
 dim(kelp_uptake_vector )
 head(kelp_uptake_vector)
 #plot(kelp_uptake$B_plant)
 
 cum_DIC_loss <- cumsum(kelp_uptake_vector$DIC_uptake_mol)
 sum( cum_DIC_loss )
+
+
 
 ###########################
 #---- Simulation loop ----
