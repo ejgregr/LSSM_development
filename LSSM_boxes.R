@@ -31,12 +31,13 @@ DEB_dir  <- "C:/Data/Git/LSSM_development/DEB"
 kelp_grow <- read.csv(paste0( DEB_dir, "/kelp_grow_Nov15.csv") )
 
 
-
-
 # Load configuration files (flow matrix and box volumes)
 volume_df  <- read.csv( paste(box_dir, "box_volumes.csv", sep="/"), stringsAsFactors = FALSE)
 flow_df    <- read.csv( paste(box_dir, "flow_matrix_active.csv", sep="/"), stringsAsFactors = FALSE)
 #climate_df <- read.csv( paste(box_dir, "box_climate.csv", sep="/"), stringsAsFactors = FALSE)
+
+# Trim the input data
+volume_df <- volume_df[,-ncol(volume_df)]
 
 # Get box names and details; create an index
 boxes <- volume_df$BoxName
@@ -48,8 +49,8 @@ iboxes <- boxes[ volume_df$BoxType =="internal" ]
 bboxes <- boxes[ volume_df$BoxType =="boundary" ]
 
 # Create volume vectors 
-vol_surf <- setNames(volume_df$SurfaceVolume_m3, volume_df$BoxName)[boxes]
-vol_bot  <- setNames(volume_df$BottomVolume_m3, volume_df$BoxName)[boxes]
+vol_surf <- setNames(volume_df$SurfVol_m3, volume_df$BoxName)[boxes]
+vol_bot  <- setNames(volume_df$BottVol_m3, volume_df$BoxName)[boxes]
 
 # Initialize flow matrices
 ebb_surf <- matrix(0, n_boxes, n_boxes, dimnames = list(boxes, boxes))
@@ -68,15 +69,15 @@ n_steps <- 150  # total tidal cycles (e.g., ~50 days)
 
 
 # Load vertical mixing constants for boxes
-alpha_mix <- setNames(volume_df$VerticalMixing, volume_df$BoxName)
-
+alpha_mix <- setNames(volume_df$VerticalMix, volume_df$BoxName)
+alpha_mix <- setNames( c(0, 0, 0, 0, 0, 0), volume_df$BoxName )
 
 #---- Initialise DIC concentration arrays ----
 
 # Assign fixed values for DIC to boundary boxes
 # Drop 2 oceanic boundaries by 100 ... 
-fixed_surf_conc <- c(QCS = 2100, JS_M = 2000, KI_F = 1800)
-fixed_bot_conc  <- c(QCS = 2150, JS_M = 2100, KI_F = 1900)
+fixed_surf_conc <- c(QCS = 2000, KI_F = 1800)
+fixed_bot_conc  <- c(QCS = 2100, KI_F = 1900)
 
 
 
@@ -86,9 +87,9 @@ conc_bot  <- matrix(NA, nrow = n_boxes, ncol = n_steps, dimnames = list(boxes, N
 
 ### DIC HERE FOR BBOXES SHOULD BE SET TO FIXED VALUES ABOVE
 # Example initial DIC conditions (µmol/kg)
-# Box order:      GK_Shore, GK, KI_M, KI_F, JS_M, QCS
-conc_surf[, 1] <- c(1900, 1950, 2000, 1800, 2100, 2200 )[match(boxes, boxes)]
-conc_bot[, 1]  <- c(1920, 1970, 2020, 1900, 2200, 2250 )[match(boxes, boxes)]
+# Box order:      VS_Shore, CP, VS, KI_M, KI_F, QCS
+conc_surf[, 1] <- c(1900, 1850, 1950, 2000, 1800, 2200 )[match(boxes, boxes)]
+conc_bot[, 1]  <- c(1920, 1850, 1970, 2020, 1900, 2250 )[match(boxes, boxes)]
 
 # Grow some kelp for the KK_shore box
 kelp_params <- data.frame(
@@ -102,12 +103,12 @@ kelp_params <- data.frame(
 
 
 
-kelp_uptake_vector <- generate_kelp_DIC_uptake(kelp_params, kelp_grow$days)
-dim(kelp_uptake_vector )
-head(kelp_uptake_vector)
-#plot(kelp_uptake$B_plant)
+kelp_uptake <- generate_kelp_DIC_uptake(kelp_params, kelp_grow$days)
+dim(kelp_uptake )
+head(kelp_uptake)
+plot(kelp_uptake$B_plant)
 
-cum_DIC_loss <- cumsum(kelp_uptake_vector$DIC_uptake_mol)
+cum_DIC_loss <- cumsum(kelp_uptake$DIC_uptake_mol)
 sum( cum_DIC_loss )
 
 
@@ -140,7 +141,6 @@ for (t in 2:n_steps) {
   }
   
   # Vertical mixing after tracer advection
-  
   for (j in boxes) {
     mix <- applyVerticalMixing(
       box = j,
@@ -155,10 +155,10 @@ for (t in 2:n_steps) {
   }
   
   # Kelp drawdown in KK_shore during update
-  if ("GK_shore" %in% boxes) {
+  if ("VS_shore" %in% boxes) {
     # mol → µmol/kg
-    loss_umol_kg <- kelp_uptake_vector$DIC_uptake_mol[t] * 1e6 / vol_surf["GK_shore"]
-    conc_surf["GK_shore", t] <- conc_surf["GK_shore", t] - loss_umol_kg
+    loss_umol_kg <- kelp_uptake$DIC_uptake_mol[t] * 1e6 / vol_surf["VS_shore"]
+    conc_surf["VS_shore", t] <- conc_surf["VS_shore", t] - loss_umol_kg
   }
   
   # Reset boundary conditions
@@ -166,8 +166,79 @@ for (t in 2:n_steps) {
   conc_bot[bboxes, t]  <- fixed_bot_conc[bboxes]
   
 }
-
+#--- End model loop 
 conc_surf
+
+# DIC concentrations of interior boxes 
+interior <- setdiff(boxes, bboxes)
+matplot(
+  t(conc_surf[interior, ]),
+  type = "l", lwd = 2,
+  lty = 1,                     # <-- force all lines to be solid
+  xlab = "Time step",
+  ylab = "Surface DIC (µmol/kg)",
+  main = "Interior Surface Concentrations",
+  col = 1:length(interior)
+)
+legend(
+  "topright",
+  legend = interior,
+  col = 1:length(interior),
+  lwd = 2,
+  lty = 1                     # <-- solid in legend
+)
+
+
+# DIC concentrations of boundary boxes 
+matplot(
+  t(conc_surf[bboxes, ]),
+  type = "l", lwd = 2,
+  lty = 1,                     # <-- force all lines to be solid
+  xlab = "Time step",
+  ylab = "Surface DIC (µmol/kg)",
+  main = "Boundary Box Surface Concentrations",
+  col = 1:length(bboxes)
+)
+legend(
+  "topright", legend = bboxes, col = 1:length(bboxes), lwd = 2
+)
+
+
+# Total DIC over time 
+total_DIC <- colSums(conc_surf * vol_surf)
+plot(
+  total_DIC,
+  type = "l", lwd = 2,
+  lty = 1,                     # <-- force all lines to be solid
+  xlab = "Time step",
+  ylab = "Total Surface DIC (µmol/kg × m³)",
+  main = "Total Surface DIC Over Time"
+)
+
+
+
+
+
+
+
+
+vol_surf
+rownames(flow_surf)
+rownames(conc_surf)
+
+
+rownames(flow_surf)
+vol_surf
+
+
+
+
+
+
+
+
+
+
 
 #----- Troubleshooting
 # sum(flood_surf)

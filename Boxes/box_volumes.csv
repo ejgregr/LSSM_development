@@ -1,7 +1,7 @@
-BoxName,BoxType,Area_ha,Depth_m,SurfaceVolume_m3,BottomVolume_m3,VerticalMixing,MixNotes
-GK_shore,internal,200,25,4.00E+07,1.00E+07,0.9,"shallow,  well-mixed"
-GK,internal,1400,50,2.80E+08,4.20E+08,0.02,weak stratification (0.1?)
-KI_M,internal,2600,100,5.20E+08,2.08E+09,0.02,"turbulent,  moderate mixing"
-KI_F,boundary,100000,100,2.00E+10,8.00E+10,0.005,"well stratified, density-based"
-JS_M,boundary,100000,400,2.00E+10,3.80E+11,0.02,"turbulent,  moderate mixing"
-QCS,boundary,100000,200,2.00E+10,1.80E+11,0.005,"deep, well-stratified"
+BoxName,BoxType,Area_ha,Depth_m,SurfVol_m3,BottVol_m3,VerticalMix,MixNotes
+VS_shore,internal,200,25,4.00E+07,1.00E+07,0.9,"shallow,  well-mixed"
+CP,internal,300,10,2.90E+07,1.00E+06,1,Fully mixed
+VS,internal,1400,50,3.50E+08,3.50E+08,0.02,weak stratification
+KI_M,internal,2600,100,1.30E+09,1.30E+09,0.02,"turbulent,  moderate mixing"
+KI_F,boundary,50000,100,2.50E+10,2.50E+10,0.005,"well stratified, density-based"
+QCS,boundary,100000,200,5.00E+10,1.50E+11,0.005,"deep, well-stratified"

@@ -238,13 +238,13 @@ We began with a 1-dimensional plant model. This quickly highlighted the need to 
 Each box tracks time-dependent physical state variables relevant to estuarine stratification and mixing: temperature (T, in C), salinity (S, in PSU), and water density (rho, in kg/m³), with density calculated at each time step using the UNESCO equation of state (rho = f(T, S)). These variables formed the basis for resolving both horizontal and vertical exchange dynamics. Optionally, additional state variables such as dissolved oxygen, dissolved inorganic carbon (DIC), or nutrients (e.g., nitrate, phosphate) could be included, depending on the modeling objectives. The model also allowed for the calculation of light attenuation, vertical density gradients, and buoyancy frequencies to inform stability and mixing thresholds.
 
 ### Model structure and spatial configuration
-For the proof-of-concept, we created a two-layer estuarine box model comprising 3 interior and 3 boundary boxes, each divided into a surface and bottom layer. This configuration allowed us to explore the mixing between the G!o'gwade basin, it's intertidal, and the adjacent, mixed waters of Knight Inlet. Box boundaries were defined according to bathymetry, and assumed hydrodynamics around mixing within and adjacent to G!o'gwade Damski. Table 1 summarizes the structural properties of each box, including depth and volume.
+For the proof-of-concept, we created a two-layer estuarine box model comprising 3 interior and 3 boundary boxes, each divided into a surface and bottom layer. This configuration allowed us to explore the mixing between the Village Sea basin, it's intertidal, and the adjacent, mixed waters of Knight Inlet. Box boundaries were defined according to bathymetry, and assumed hydrodynamics around mixing within and adjacent to the Village Sea. Table 1 summarizes the structural properties of each box, including depth and volume.
 
 ```{r, BoxVolumeTable, echo=FALSE, results='asis', escape=FALSE}
 name_table <- data.frame( 
-  Box_name = c("G!o'gwade Shore", "G!o'gwade Basin", "Knight Inlet - mixed", "Knight Inlet - fresh", "Johnstone Strait - mixed", "Queen Charlotte Strait"),
-  Box_code <- c("GK_shore", "GK", "KI_M", "KI_F", "JS_M", "QCS"),
-  Box_type <- c("Internal", "Internal", "Internal", "Boundary", "Boundary", "Boundary"))
+  Box_name = c("Village Sea Shore", "Village Sea Basin", "Knight Inlet - mixed", "Knight Inlet - fresh", "Queen Charlotte Strait"),
+  Box_code <- c("VS_shore", "VS", "KI_M", "KI_F", "QCS"),
+  Box_type <- c("Internal", "Internal", "Internal", "Boundary", "Boundary"))
   
   #...  Table should be made from what is loaded ... 
         
@@ -266,16 +266,14 @@ name_table <- data.frame( )
 
 #  ...  Table should be made from what is loaded ... 
 
-#  GK        = 0,   # weak stratification
-#  GK_shore  = 0.9,   # shallow, well-mixed
-##  KK        = 0.1,   # weak stratification
-##  KK_shore  = .9,   # shallow, well-mixed
-#  KI_M      = 0.02,  # turbulent, moderate mixing
-#  JS_M      = 0.02,  # turbulent, moderate mixing
-#  QCS       = 0.005, # deep, well stratified
-#  KI_M      = 0.005  # well stratified, density-based
+#  VS        = 0,      # weak stratification
+#  VS_shore  = 0.9,    # shallow, well-mixed
+#  KI_F      = 0.02,   # well stratified, density-based
+#  KI_M      = 0.02,   # turbulent, moderate mixing
+#  QCS       = 0.005,  # deep, well stratified
+#  KI_M      = 0.005   # well stratified, density-based
 
-        
+    
 kable(name_table, format = "latex", booktabs = TRUE, 
   caption = "Box model flow rates") %>%
   column_spec(3, latex_column_spec = "p{4in}") %>% 
@@ -313,9 +311,16 @@ Simulations were conducted using the `ode()` function from the `deSolve` package
 # Results
 
 ## Box model proof of concept
-An initial set of 7 boxes was defined, with approximate areas measured. Three boundary boxes were used to represent marine and estuarine (from Knight Inlet) flows. Volumes were calculated for surface and deep layers based on a mean depth, and an assumed surfaced mixed layer of 20 m.  
+An initial set of 6 boxes was defined, with approximate areas measured. Two boundary boxes represented marine (WCS) and estuarine (KI) flows respectively. Volumes were calculated for surface and deep layers based on a mean depth, and an assumed surfaced mixed layer of 20 m.  
 
 A flow matrix was estimated between the boxes ... 
+
+
+- time step is one tidal phase
+- flow matrices represent a nondimensional fraction of the source box volume exchanged per time step
+- by incorporating DIC concentration, the matrix moves mass between boxes, using fraction of volume rather than absolute fluxes. This is consistent with tidal exchange models, and box models for fjords and estuaries (REFs). 
+
+- alpha_mix specifies the rate of vertical mixing
 
 
 
