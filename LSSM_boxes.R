@@ -20,23 +20,22 @@
 #
 #################################################################################
 
-setwd( "c:/Data/Git/LSSM_development")
-source( "LSSM_box_functions.R" )
-
 #---- Constants and global variables ----
+setwd( "c:/Data/Git/LSSM_development")
+
 box_dir <- "C:/Data/Git/LSSM_development/Boxes"
 DEB_dir  <- "C:/Data/Git/LSSM_development/DEB"
 
+source( "LSSM_box_functions.R" )
 
-kelp_grow <- read.csv(paste0( DEB_dir, "/kelp_grow_Nov15.csv") )
-
-
+#---- Prepare the box model ----
 # Load configuration files (flow matrix and box volumes)
 volume_df  <- read.csv( paste(box_dir, "box_volumes.csv", sep="/"), stringsAsFactors = FALSE)
-flow_df    <- read.csv( paste(box_dir, "flow_matrix_active.csv", sep="/"), stringsAsFactors = FALSE)
+#flow_df    <- read.csv( paste(box_dir, "flow_matrix_active.csv", sep="/"), stringsAsFactors = FALSE)
+flow_df    <- read.csv( paste(box_dir, "flow_matrix_Nov16_almost.csv", sep="/"), stringsAsFactors = FALSE)
 #climate_df <- read.csv( paste(box_dir, "box_climate.csv", sep="/"), stringsAsFactors = FALSE)
 
-# Trim the input data
+# Trim the input data (cuz notes in csv file)
 volume_df <- volume_df[,-ncol(volume_df)]
 
 # Get box names and details; create an index
@@ -64,22 +63,25 @@ ebb_bot    <- x$ebb_bot
 flood_surf <- x$flood_surf
 flood_bot  <- x$flood_bot
 
-# Need some time. 
-n_steps <- 150  # total tidal cycles (e.g., ~50 days)
-
-
 # Load vertical mixing constants for boxes
 alpha_mix <- setNames(volume_df$VerticalMix, volume_df$BoxName)
 alpha_mix <- setNames( c(0, 0, 0, 0, 0, 0), volume_df$BoxName )
 
+#---- Load kelp growth ---- 
+# Use saved kelp growth time series (see LSSM_DEB.r, LSSM_growth.R vestigial but still some good piences?)
+kelp_grow <- read.csv(paste0( DEB_dir, "/kelp_grow_Nov15.csv") )
+
+kelp_uptake <- generate_kelp_DIC_uptake(kelp_grow, 10000)
+head( kelp_uptake)
+# For longer 'burn in' time series when kelp growth doesn't matter
+#kelp_uptake <- generate_kelp_DIC_uptake(kelp_params, c(kelp_grow$days,kelp_grow$days,kelp_grow$days) )
+
+n_steps <- dim( kelp_uptake )[[1]] 
+
 #---- Initialise DIC concentration arrays ----
-
 # Assign fixed values for DIC to boundary boxes
-# Drop 2 oceanic boundaries by 100 ... 
-fixed_surf_conc <- c(QCS = 2000, KI_F = 1800)
-fixed_bot_conc  <- c(QCS = 2100, KI_F = 1900)
-
-
+# fixed_surf_conc <- c(QCS = 1900, KI_F = 1900)
+fixed_bot_conc  <- c(QCS = 1920, KI_F = 1920)
 
 # Initialise tracer matrices (DIC example)
 conc_surf <- matrix(NA, nrow = n_boxes, ncol = n_steps, dimnames = list(boxes, NULL))
@@ -87,35 +89,21 @@ conc_bot  <- matrix(NA, nrow = n_boxes, ncol = n_steps, dimnames = list(boxes, N
 
 ### DIC HERE FOR BBOXES SHOULD BE SET TO FIXED VALUES ABOVE
 # Example initial DIC conditions (µmol/kg)
+
+fixed_surf_conc <- c(QCS = 2000, KI_F = 1800)
+fixed_bot_conc  <- c(QCS = 2100, KI_F = 1900)
 # Box order:      VS_Shore, CP, VS, KI_M, KI_F, QCS
-conc_surf[, 1] <- c(1900, 1850, 1950, 2000, 1800, 2200 )[match(boxes, boxes)]
-conc_bot[, 1]  <- c(1920, 1850, 1970, 2020, 1900, 2250 )[match(boxes, boxes)]
+conc_surf[, 1] <- c(1900, 1900, 1900, 1900, fixed_surf_conc[2], fixed_surf_conc[1] )[match(boxes, boxes)]
+conc_bot[, 1]  <- c(1920, 1920, 1920, 1920, fixed_bot_conc[2],  fixed_bot_conc[1] )[match(boxes, boxes)]
 
-# Grow some kelp for the KK_shore box
-kelp_params <- data.frame(
-  N_plants = 1000000,
-  B_init = 0.025,
-  B_max = 9.23,
-  R_max = 0.065,
-  wet_to_dry = 0.13,
-  dry_to_C = 0.25
-)
-
-
-
-kelp_uptake <- generate_kelp_DIC_uptake(kelp_params, kelp_grow$days)
-dim(kelp_uptake )
-head(kelp_uptake)
-plot(kelp_uptake$B_plant)
+# Update boxes with balanced values (i.e., conc_surf after 'burn in')
+conc_surf[, 1] <- c(4163, 2706, 2155, 365, fixed_surf_conc[2], fixed_surf_conc[1] )[match(boxes, boxes)]
+conc_bot[, 1]  <- c(4163, 2706, 2155, 365, fixed_bot_conc[2],  fixed_bot_conc[1] )[match(boxes, boxes)]
 
 cum_DIC_loss <- cumsum(kelp_uptake$DIC_uptake_mol)
 sum( cum_DIC_loss )
 
-
-
-###########################
-#---- Simulation loop ----
-
+#--------------------------- Simulation loop -------------------------------
 for (t in 2:n_steps) {
   # Choose ebb or flood
   if (t %% 2 == 0) {
@@ -154,22 +142,40 @@ for (t in 2:n_steps) {
     conc_bot[j, t]  <- mix$conc_bot
   }
   
-  # Kelp drawdown in KK_shore during update
+  # Kelp drawdown in VS_shore during update
+  kelp_DIC <- as.numeric( kelp_uptake$DIC_uptake_mol[t] )
   if ("VS_shore" %in% boxes) {
     # mol → µmol/kg
-    loss_umol_kg <- kelp_uptake$DIC_uptake_mol[t] * 1e6 / vol_surf["VS_shore"]
+    loss_umol_kg <- kelp_DIC * 1e6 / vol_surf["VS_shore"]
     conc_surf["VS_shore", t] <- conc_surf["VS_shore", t] - loss_umol_kg
   }
-  
+
   # Reset boundary conditions
   conc_surf[bboxes, t] <- fixed_surf_conc[bboxes]
   conc_bot[bboxes, t]  <- fixed_bot_conc[bboxes]
   
 }
 #--- End model loop 
-conc_surf
 
-# DIC concentrations of interior boxes 
+#---- Plot and inspect results ----
+#---- DIC concentrations All boxes ----
+par(cex=1.2)
+all_boxes <- c(iboxes, bboxes)
+line_types <- ifelse(all_boxes %in% iboxes, 1, 2)
+colors <- 1:length(all_boxes)
+
+# Plot surface layer
+matplot(t(conc_surf[all_boxes, ]), type = 'l', lty = line_types, lwd = 2, col = colors,
+        main = "Surface Layer Tracer Concentration", xlab = "Time step", ylab = "µmol/kg")
+legend("topright", legend = all_boxes, col = colors, lty = line_types, , lwd = 2, bty = "n")
+
+# Plot bottom layer
+#matplot(t(conc_bot[all_boxes, ]), type = 'l', lty = line_types, col = colors,
+#        main = "Bottom Layer Tracer Concentration", xlab = "Time step", ylab = "µmol/kg")
+#legend("topright", legend = all_boxes, col = colors, lty = line_types, bty = "n")
+
+#---- DIC concentrations of interior boxes ----
+par(cex = 1.2) # For clipping plots to ppt ... 
 interior <- setdiff(boxes, bboxes)
 matplot(
   t(conc_surf[interior, ]),
@@ -188,8 +194,7 @@ legend(
   lty = 1                     # <-- solid in legend
 )
 
-
-# DIC concentrations of boundary boxes 
+#---- DIC concentrations of boundary boxes ----
 matplot(
   t(conc_surf[bboxes, ]),
   type = "l", lwd = 2,
@@ -203,8 +208,7 @@ legend(
   "topright", legend = bboxes, col = 1:length(bboxes), lwd = 2
 )
 
-
-# Total DIC over time 
+#---- Total DIC over time ----
 total_DIC <- colSums(conc_surf * vol_surf)
 plot(
   total_DIC,
@@ -216,62 +220,47 @@ plot(
 )
 
 
+#---- testing drawndown effect on concentrations: each needs a separate run of the model  ----
+# not sure this is needed ... :\
+conc_no_kelp <- conc_surf
+conc_1000_kelp <- conc_surf
+conc_100000_kelp <- conc_surf
 
+#saved runs
+sum( conc_no_kelp['VS_shore',100:110] )
+sum( conc_1000_kelp['VS_shore',100:110] )
+sum( conc_100000_kelp['VS_shore',100:110] )
 
+plot_box_series("VS_shore", conc_no_kelp, conc_1000_kelp, conc_100000_kelp)
 
-
-
-
-vol_surf
-rownames(flow_surf)
-rownames(conc_surf)
-
-
-rownames(flow_surf)
-vol_surf
-
-
-
-
-
-
-
-
-
-
-
-#----- Troubleshooting
-# sum(flood_surf)
-# sum(ebb_surf)
-# sum(flood_bot)
-# sum(ebb_bot)
-# 
-# flow_df
-# 
-# cat("vol_bot[M_KI] =", vol_bot["M_KI"], "\n")
-# sum(flow_bot[, "M_KI"] * conc_bot[, 1] * vol_bot)
-
-
-#---- Plot and inspect results ----
-# Combine in plotting order
-all_boxes <- c(iboxes, bboxes)
-line_types <- ifelse(all_boxes %in% iboxes, 1, 2)
-colors <- 1:length(all_boxes)
-
-# Plot surface layer
-matplot(t(conc_surf[all_boxes, ]), type = 'l', lty = line_types, col = colors,
-        main = "Surface Layer Tracer Concentration", xlab = "Time step", ylab = "µmol/kg")
-legend("topright", legend = all_boxes, col = colors, lty = line_types, bty = "n")
-
-# Plot bottom layer
-matplot(t(conc_bot[all_boxes, ]), type = 'l', lty = line_types, col = colors,
-        main = "Bottom Layer Tracer Concentration", xlab = "Time step", ylab = "µmol/kg")
-legend("topright", legend = all_boxes, col = colors, lty = line_types, bty = "n")
-
-
-#plot( kelp_uptake_vector$DIC_uptake_mol )
-
+plot_box_series <- function(box_name, c1, c2, c3) {
+  
+  # extract the row for the chosen box
+  x <- rbind(
+    c1[box_name, ],
+    c2[box_name, ],
+    c3[box_name, ]
+  )
+  
+  # make the plot
+  matplot(
+    t(x),
+    type = "l", lwd = 2, lty = 1,
+    col = c("black", "red", "blue"),
+    xlab = "Time", ylab = "DIC",
+    main = box_name
+  )
+  
+  legend(
+    "topright",
+    legend = c("c1", "c2", "c3"),
+    col = c("black", "red", "blue"),
+    lwd = 2, lty = 1
+  )
+}
 
 
 
 ### Fin
+
+

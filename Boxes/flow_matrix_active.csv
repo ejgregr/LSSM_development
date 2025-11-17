@@ -1,0 +1,15 @@
+From,To,Tide,RF_surface,RF_bottom,exch_fraction
+KI_F,KI_M,ebb,1,0,0.005
+KI_M,KI_F,flood,1,0,0.005
+KI_M,QCS,ebb,1,0,0.01
+QCS,KI_M,flood,1,0,0.01
+VS,QCS,ebb,1,0,0.003
+QCS,VS,flood,1,0,0.003
+KI_M,VS,ebb,1,0,0.03
+VS,KI_M,flood,1,0,0.03
+VS_shore,VS,ebb,1,0,0.05
+VS,VS_shore,flood,1,0,0.015
+VS_shore,CP,ebb,1,0,0.01
+CP,VS_shore,flood,1,0,0.7
+CP,KI_F,ebb,1,0,0.8
+KI_F,CP,flood,1,0,0.001

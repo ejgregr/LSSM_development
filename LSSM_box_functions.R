@@ -7,29 +7,32 @@
 #################################################################################
 
 
-
 #################################################################################
 ### Box functions
 
-generate_kelp_DIC_uptake <- function(params, days) {
+# Estimates daily DIC drawdown based on growth of 1 plant and the n of plants
+generate_kelp_DIC_uptake <- function(grow_df, N_plants ) {
   
-  n_days <- length(days)
+  wet_to_dry   = 0.13
+  dry_to_C     = 0.25
+  mol_per_kg   = 1 / 0.01201
   
-  with(params, {
-    # Logistic biomass curve (kg wet per plant)
-    B_t <- B_max / (1 + ((B_max - B_init) / B_init) * exp(-R_max * seq_len(n_days)))
+  n_days <- length( grow_df$days )
+  
+  with(grow_df, {
     
     # Daily biomass gain (wet weight)
-    delta_B <- c(0, diff(B_t))  # kg wet per day per plant
+    B <- as.numeric( grow_df$B_kgWW )
+    delta_B <- c(0, diff( B ))  # kg wet per day per plant
     
     # Convert to mol C (DIC) uptake per day
-    DIC_uptake_mol <- delta_B * wet_to_dry * dry_to_C * N_plants
+    uptake <- delta_B * ( wet_to_dry * dry_to_C * N_plants * mol_per_kg )
     
     data.frame(
       date = days,
-      B_plant = B_t,
+      B_plant = B_kgWW,
       delta_B = delta_B,
-      DIC_uptake_mol = DIC_uptake_mol
+      DIC_uptake_mol = uptake
     )
   })
 }
