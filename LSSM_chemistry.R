@@ -38,7 +38,7 @@ plot( kelp_grow$days, molDIC_fixed )
 
 #Use diff() to return difference btwn consecutive elements. So now its DIC fixed/day
 #This is equivalent to the rate of kelp growth. 
-delkDIC <- c( 'NA', diff( molDIC_fixed )) 
+delkDIC <- c( 0, diff( molDIC_fixed )) 
 #NOTE: Length is now day_stamps-1
 plot( kelp_grow$days, delkDIC, ylab = "mol DIC fixed / day" )
 
@@ -64,13 +64,13 @@ plot( x=daily_ocean$days, y=oceanCarb$pH, type='l', xlab='', ylab='pH')
 par(mfcol = c(1,1))
 
 # Compare pH using salinity (alkalinity), and temperature directly from the Columbia
-x <- "Comparing pH from assembled ocean data (line) to MV Columbia sensor data (points)" 
+x <- "pH from 'ambient' ocean data (line) and MV Columbia sensor data (points)" 
 csalt <- CalcAlk( ak_dat$Smn )
 columbia_carb <- carb( flag_CA, var1=ak_dat$CO2mn , var2=csalt,
                    S=ak_dat$Smn, T=ak_dat$Tmn )
 
 # Plot Columbia-based pH vs. daily_ocean data 
-par( cex = 1.3) # suitable for cut/pste to ppt
+par( cex = 1.5) # suitable for cut/pste to ppt
 plot( x=daily_ocean$days, y=oceanCarb$pH, type='l', xlab='', ylab='pH', main = x)
 points( ak_dat$date, y=columbia_carb$pH, pch = 21, bg = "black")
 
@@ -158,10 +158,14 @@ ggplot(final_df) +
                 colour = factor(Volume_kg),
                 group = Volume_kg),
             size = 1.05) +
-  theme_light() +
+  theme_light(base_size = 18) +
   labs(
     x = "Day of Year",
-    colour = "Volume (kg)"
+    colour = "Water mass (kg)",
+    title = "Daily pH chance from ambient for different sea water masses"
+  ) +
+  theme(
+    plot.title = element_text(size = 22, face = "bold", hjust = 0.5)
   )
 
 

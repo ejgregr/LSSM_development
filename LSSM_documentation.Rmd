@@ -127,7 +127,7 @@ For our proof-of-concept model, we obtained pCO$_2$ measures from the Alaska Mar
 Sample data for model development taken from Alaska ferry data. Accessible here:  
 https://catalogue.hakai.org/erddap/tabledap/HakaiColumbiaFerryResearch.html  
 
-For the prototype, we collected near-continuous measurements of pCO$_2$ along with ancillary measurements of temperature, salinity, and dissolved oxygen using two project-specific moorings. Each mooring included a CO2Pro, a star-oddi and a minidot for O2. Redundant star-oddis were atatched partway through the season for groundtruthing. We also obtained direct measurements of pCO$_2$, total DIC (or TCO$_2$), and salinity from Water samples collected across time and space (see Figure X).   
+For the prototype, we collected near-continuous measurements of pCO$_2$ along with ancillary measurements of temperature, salinity, and dissolved oxygen using two project-specific moorings. Each mooring included a CO2Pro, a star-oddi and a minidot for O2. Redundant star-oddis were attached partway through the season for groundtruthing. We also obtained direct measurements of pCO$_2$, total DIC (or TCO$_2$), and salinity from Water samples collected across time and space (see Figure X).   
 
 ## Kelp growth
 ### Proof of concept

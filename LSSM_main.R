@@ -127,15 +127,85 @@ kelp_grow <- grow_kelp4(daily_ocean )
 
 #write.csv(kelp_grow, paste0( DEB_dir, "/kelp_grow_Nov15.csv"), row.names = FALSE)
 
+kelp_grow$B_fronds_gDW
 
-par(mfrow=c(1,1))
+plot( c( 0, diff( kelp_grow$B_fronds_gDW )) )
+
+
+
+par(mfrow=c(1,1), cex=1.2)
 FullKelpPlot( kelp_grow )
 
 # Examine growth inhibitors
 matplot(kelp_grow$days[-1], kelp_grow[-1,c("fT","fL")], type="l", lwd=2,
         col=c("red","blue"), ylab="Modifier (0–1)", xlab="Date")
-legend("topright", legend=c("Temp limit","Light limit"),
+legend("bottomleft", legend=c("Temp limit","Light limit"),
        col=c("red","blue"), lty=1, lwd=2)
+
+
+daily_kelp <- c( 0, diff( kelp_grow$B_fronds_gDW ))
+
+matplot(
+  kelp_grow$days[-1],
+  cbind( kelp_grow$fT[-1], kelp_grow$fL[-1], daily_kelp[-1] ),
+  type = "l", lwd = 2, col = c("red", "blue", "darkgreen"),
+  xlab = "Date", ylab = "Modifier (0–1)"
+)
+
+legend(
+  "bottomleft",
+  legend = c("Temp limit", "Light limit", "Daily kelp growth"),
+  col = c("red", "blue", "darkgreen"), lty = 1, lwd = 2
+)
+
+
+
+# --- First plot: fT and fL on left axis ---
+par(mar = c(5, 5, 4, 6), cex=1.3)
+matplot(
+  kelp_grow$days[-1],
+  kelp_grow[-1, c("fT", "fL")],
+  type = "l", lwd = 2, lty = 1,
+  col = c("red", "blue"),
+  xlab = "Date",
+  ylab = "Modifier (0–1)"
+)
+
+legend( x=19480, y=0.95,
+       legend = c("Temp limit", "Light limit"),
+       col = c("red", "blue"), lty = 1, lwd = 2)
+
+# --- Add kelp growth on the right axis ---
+par(new = TRUE)   # allow overplotting
+
+plot(
+  kelp_grow$days[-1],
+  daily_kelp[-1],
+  type = "l", lwd = 2, col = "darkgreen",
+  axes = FALSE, xlab = "", ylab = ""
+)
+
+axis(side = 4, las=1)  # right y-axis
+mtext("Daily kelp growth (g DW/day)", side = 4, line = 3, cex=1.3)
+
+legend( x=19480, y=4,
+       legend = "Kelp growth",
+       col = "darkgreen", lty = 1, lwd = 2)
+
+
+
+locator(1)
+
+
+
+
+
+
+
+
+
+
+
 
 
 names( kelp_grow )
