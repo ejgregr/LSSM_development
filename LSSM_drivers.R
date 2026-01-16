@@ -15,9 +15,6 @@
 #################################################################################
 
 
-# Load 2025 observational data. 
-input_path <- file.path(DEB_dir, "kelp_project_data.RData" )
-load(input_path)
 
 #Includes
 # DST data: Temp, Salinity, Conductivity, DateTime

@@ -23,169 +23,90 @@ source( "LSSM_config2.R" )
 start_date <- "2023-05-04 00:00:00 PDT"
 end_date   <- "2023-10-11 00:00:00 PDT"
 
-
-#---- Part 1: Load environmental drivers ----
+#---- Part 1: Load and prep environmental drivers ----
 # Loads temperature, salinity, CO2, and oxygen from moorings
-source( "LSSM_drivers.R" )
+source( "LSSM_config2.R" )
+
+#---- Environmental data prep --------
+DLI_env  <- data.frame( "Datestamp" = DLI_df$Date, "DLI" = DLI_df$mean )
+temp_env <- data.frame( "Datestamp" = date( DST_focal1$DateTime ), "Temp" = DST_focal1$Temp )
+PAR_env  <- data.frame( "Datestamp" = par_df$Timestamp, "PAR" = par_df$mean, "SD" = par_df$stdDev )
+env_daily <- make_env_daily( DLI_env, temp_env )
+head(env_daily)
+
+# Daylight hours for the days in env_daily 
+day_hours <- get_daylight_hours( PAR_env )
+
+# Join daylight hours to available daily environmental data 
+env_daily <- env_daily %>%
+  left_join(day_hours, by = "Datestamp")
+
+
+#---- Nereo growth parameters (older) ----
+# B_init      <- 0.025  # Initial mass of sporophyte (est. at 25 mg based on ChatGPT)
+# B_max       <- 9.23   # Max biomass for an adult Nereo. Calculated from field results (Weigel and Pfister 2021)
+# r_max       <- 0.065  # Maximum daily growth rate, assuming 6 month growth and mature plant is 9.23 kg 
+# sp_start    <- 0.005  # Established sporophyte mass (5 g)
+# wet_to_dry  <- 0.13   # Water content of Nereo (Bullen et al. 2024)
+# dry_to_C    <- 0.25   # Carbon content of Nereo (dry) (Bullen et al. 2024)
+# 
+# #---- Environmental influence on growth rate
+# T_opt     <- 10        # Optimal temperature (°C)
+# T_max     <- 14        # Maximal temperature for growth (°C)
+# DLI_opt   <- 30        # Optimal DLI in mol/m2/day
+# DLI_range <- 20        # Range (+/-) that allows growth in mol/m2/day 
 
 
 
 
+#-------------- Run the ODE model  ---------------------------------
+source( "LSSM_ODE.R" )
 
-#---- Show Hourly temp and salinity for BATI moorings 5 and 7 ----
-BATI5$Mooring <- 'BATI5'
-BATI7$Mooring <- 'BATI7'
-plotme <- rbind( BATI5, BATI7)
-
-# Plot full (hourly) temperature and salinity time series
-PlotBATI( plotme, var='temp', head='Mooring time series of temperature (C)')
-PlotBATI( plotme, var='salt', head='Mooring time series of salinity (psu)') 
-
-# Add mooring ID for plotting daily mooring time series and merge
-dBATI5$Mooring <- 'BATI5'
-dBATI7$Mooring <- 'BATI7'
-plotme <- rbind( dBATI5, dBATI7)
-
-PlotBATI(plotme, var='temp_mean', head='Mooring daily time series of temperature (C)')
-PlotBATI(plotme, var='salt_mean', head='Mooring daily time series of salinity (psu)')
-
-#---- Create and show alkalinity from salinity for BATI moorings 5 and 7----
-# Using equation from Evans et al. 2015:  TA = 48.7709*S + 606.23 (μmol kg-1)
-
-daily_TA <- data.frame( date = dBATI5$datestamp )
-daily_TA$B5 <- CalcAlk( dBATI5$salt_mean )
-daily_TA$B7 <- CalcAlk( dBATI7$salt_mean )
-
-plot( daily_TA$date, daily_TA$B5, type='l', main= "Average, Daily Total Alkalinity (BATI5)",
-      xlab="", ylab="mol / kg" )
-
-plot( daily_TA$date, daily_TA$B7, type='l', main= "Average, Daily Total Alkalinity (BATI7)",
-      xlab="", ylab="mol / kg" )
-
-#---- Part 1b: Create and Add solar input ----
-# Temporal resolution and extents depend on mooring data
-# Light data available from sensors but needs cleaning up. Simulate for now.
-
-BATI5 <- AddSurfaceLight( df = BATI5, lat =latitude, lon = longitude,
-                      datetime_col = 'datestamp', tz = bc_time )
-
-# Now update the daily data frame with daily light index
-# Function returns df of [date, DLI]
-x <- ParToDLI(df = BATI5, datetime_col = "datestamp", 
-              par_col = "PAR_umol_m2_s", tz = bc_time)
-dBATI5 <- cbind( dBATI5, "DLI" = x[[2]] )
-dBATI7 <- cbind( dBATI7, "DLI" = x[[2]] )
+#----- First view of output  ----- 
+out_df <- as.data.frame( output )
+bio_df <- get_biomass_timeseries( out_df )
+kelp_plot <- plot_kelp_biomass(bio_df)
+print(kelp_plot)
 
 
 
-#---- Show hourly PAR and DLI ----
-par(mfrow=c(2,1), mar=c(2,4,2,1) )
-plot(BATI5$datestamp, BATI5$PAR_umol_m2_s,
-     type = "l", xlab = "Time", ylab = "Surface PAR (µmol m⁻² s⁻¹)",
-     main= "Hourly Photosynthetically Active Radiation (simulated)")
+#-------------- Visualization and diagnostics ---------------------------------
 
-plot( dBATI5$date, dBATI5$DLI, type='l', main= "Daily Light Intensity (simulated)", 
-      xlab="", ylab="mol photons / m² d" )
+#Ensure output has multiple blades 
+ncol( output )
 
 
-#---- Part 1c: Show carbon data from the MV Columbia before and after interpolation
-plot(ak_dat$date, ak_dat$CO2mn, type = "o", main = "Full Ak Ferry daily seawater pCO2 climatology",
-     xlab = "Date", ylab = "uatm", col = "blue", lwd = 2, xaxt = "n")
-axis.Date(1, at = ak_dat$date, format = "%m-%d")
-
-plot(daily_swCO2$Date, daily_swCO2$dCO2, type = "o", main = "Summer Ak Ferry daily pCO2 - interpolated",
-     xlab = "Date", ylab = "uatm", col = "blue", lwd = 2, xaxt = "n")
-axis.Date(1, at = daily_swCO2$Date, format = "%m-%d")
+plot_individual_tissues(output, env_daily)
 
 
-#---- Build an Ocean df to house all the data ----
+first_blade_day1 <- output[2, 3]
+last_blade_day1  <- output[2, ncol(output)]
 
-# All carb() related values should be in carb() units (mol/kg) and day length:
-daily_ocean <- data.frame( 'days'   = dBATI5$date,
-                           'temp'   = dBATI5$temp_mean, 
-                           'salt'   = dBATI5$salt_mean,
-                           'DLI'    = dBATI5$DLI,
-                           'pCO2'   = daily_swCO2$dCO2,
-                           'totAlk' = daily_TA$B5 )
+final_row <- output[nrow(output), ]
+manual_frond_sum <- sum(final_row[3:ncol(output)])
+stipe_val <- final_row[2]
 
-head(daily_ocean, 10)
+#----- Visualization using output as a df ----- 
+out_df <- as.data.frame( output )
 
-
-#---- Part 2 Grow a kelp plant during main growing season (MAY to SEPT) ----
-# Go with BATI5 mooring as that's closer to the carbon data from the Columbia
-
-# Load growth function, with light and temp inhibitions, and a plotting function.
-source( "LSSM_DEB.R" )
-
-#Notes: Fronds have to grow faster than stipe for stipe to reach cap (i.e., max fraction)
-kelp_grow <- grow_kelp4(daily_ocean )
-
-#write.csv(kelp_grow, paste0( DEB_dir, "/kelp_grow_Nov15.csv"), row.names = FALSE)
-
-kelp_grow$B_fronds_gDW
-
-plot( c( 0, diff( kelp_grow$B_fronds_gDW )) )
+#--- 
+bio_df <- get_biomass_timeseries( out_df )
+kelp_plot <- plot_kelp_biomass(bio_df)
+print(kelp_plot)
 
 
-
-par(mfrow=c(1,1), cex=1.2)
-FullKelpPlot( kelp_grow )
-
-# Examine growth inhibitors
-matplot(kelp_grow$days[-1], kelp_grow[-1,c("fT","fL")], type="l", lwd=2,
-        col=c("red","blue"), ylab="Modifier (0–1)", xlab="Date")
-legend("bottomleft", legend=c("Temp limit","Light limit"),
-       col=c("red","blue"), lty=1, lwd=2)
+#--- Show blade distribution  ---
+p_dist <- plot_blade_distribution( out_df )
+print(p_dist)
 
 
-daily_kelp <- c( 0, diff( kelp_grow$B_fronds_gDW ))
+# --- Plot kelp with sloughing ---
+# Add real DOY to bio_df
+start_day <- env_daily$day[1] # e.g., 135
+bio_df$Real_DOY <- bio_df$time + start_day
 
-matplot(
-  kelp_grow$days[-1],
-  cbind( kelp_grow$fT[-1], kelp_grow$fL[-1], daily_kelp[-1] ),
-  type = "l", lwd = 2, col = c("red", "blue", "darkgreen"),
-  xlab = "Date", ylab = "Modifier (0–1)"
-)
+plot_kelp_dynamics(bio_df, env_daily, sen_day = 240)
 
-legend(
-  "bottomleft",
-  legend = c("Temp limit", "Light limit", "Daily kelp growth"),
-  col = c("red", "blue", "darkgreen"), lty = 1, lwd = 2
-)
-
-
-
-# --- First plot: fT and fL on left axis ---
-par(mar = c(5, 5, 4, 6), cex=1.3)
-matplot(
-  kelp_grow$days[-1],
-  kelp_grow[-1, c("fT", "fL")],
-  type = "l", lwd = 2, lty = 1,
-  col = c("red", "blue"),
-  xlab = "Date",
-  ylab = "Modifier (0–1)"
-)
-
-legend( x=19480, y=0.95,
-       legend = c("Temp limit", "Light limit"),
-       col = c("red", "blue"), lty = 1, lwd = 2)
-
-# --- Add kelp growth on the right axis ---
-par(new = TRUE)   # allow overplotting
-
-plot(
-  kelp_grow$days[-1],
-  daily_kelp[-1],
-  type = "l", lwd = 2, col = "darkgreen",
-  axes = FALSE, xlab = "", ylab = ""
-)
-
-axis(side = 4, las=1)  # right y-axis
-mtext("Daily kelp growth (g DW/day)", side = 4, line = 3, cex=1.3)
-
-legend( x=19480, y=4,
-       legend = "Kelp growth",
-       col = "darkgreen", lty = 1, lwd = 2)
 
 
 

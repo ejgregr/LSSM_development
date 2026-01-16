@@ -1,99 +1,128 @@
+library(deSolve)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
 
-
-
-
-
-
-###################
-
-
-
-
-
-#---- OLDER Stuff ... 
-
-# Data structure will track a plant over 12 months. 
-# All other results will be scaled to/from this. 
-
-# An initial plant - baby sporophyte
-iPlant <- dataframe( "frond_l" = 1.0,   # cm
-                     "frond_w" = 0.05,  # g
-                     "frond_n" = 50     # number of fronds
-                     "stype_d" = 0.1)   # stype diameter for mass scaling
-
-
-# Known parameters
-B0 <- 0.01    # Initial biomass (kg)
-K <- 10       # Carrying capacity (kg)
-B_final <- 10 # Final biomass after t months
-t <- 6        # Time (months)
-
-# Logistic growth function
-logistic_growth <- function(B0, K, t, r) {
-  B_predicted <- K / (1 + ((K - B0) / B0) * exp(-r * t))
-  return(B_predicted)
+# --- 1. GEOMETRIC ASSIGNMENT FUNCTION ---
+assign_geometric_start_days <- function(n, interval) {
+  start_days <- numeric(n)
+  count_assigned <- 0
+  generation <- 1
+  while (count_assigned < n) {
+    if (generation == 1) { wave_size <- 2 } else { wave_size <- 2^(generation - 1) }
+    n_in_this_wave <- min(wave_size, n - count_assigned)
+    current_day <- 1 + ((generation - 1) * interval)
+    start_idx <- count_assigned + 1
+    end_idx   <- count_assigned + n_in_this_wave
+    start_days[start_idx:end_idx] <- current_day
+    count_assigned <- count_assigned + n_in_this_wave
+    generation <- generation + 1
+  }
+  return(start_days)
 }
 
-# Monthly growth rate ESTIMATE for 6 months - optimal
-x <- NULL
-for (t in 1:6) {
-y <- logistic_growth( 0.01, 10, t, 1.565)
-x <- c( x, y)
-}
-plot(x)
+# --- 2. PARAMETER SETUP ---
+# A. Define Blade Count FIRST
+n_blades <- round(rnorm(1, mean = 41.5, sd = 13.2))
 
+# B. Create Population DataFrame
+blade_population <- data.frame(
+  max_fix   = rnorm(n_blades, 78.5, sd = 33.5),
+  doc_day   = rnorm(n_blades, 10.8, sd = 4.51),
+  doc_night = rnorm(n_blades, 3.65, sd = 3.84),
+  resp_prop = rnorm(n_blades, 0.15, sd = 0.08) 
+)
 
+# C. Apply Geometric Timing (10 Day Interval)
+split_interval <- 10 
+blade_population$start_day <- assign_geometric_start_days(n_blades, split_interval)
 
+# D. Add Jitter (Spread the waves slightly)
+jitter <- round(rnorm(n_blades, mean = 0, sd = 2)) 
+blade_population$start_day <- pmax(1, blade_population$start_day + jitter)
 
-# Parameters
-B0 <- 0.01    # Initial biomass (kg)
-K <- 10       # Carrying capacity (kg)
-t <- 1:6      # Time steps (months)
-T <- c(10, 12, 15, 18, 20, 22)  # Example temperatures (°C)
+# E. Biological "Guard Rails" 
+# CRITICAL CHANGE: Raised Min Fixation to 40 to prevent "Dud" blades that don't grow
+blade_population$max_fix   <- pmax(blade_population$max_fix, 40) 
+blade_population$resp_prop <- pmin(pmax(blade_population$resp_prop, 0.05), 0.50)
+blade_population$doc_day   <- pmax(blade_population$doc_day, 0)
+blade_population$doc_night <- pmax(blade_population$doc_night, 0)
 
-# Environmental influence on growth rate
-r_max <- 0.8  # Maximum growth rate
-T_opt <- 20   # Optimal temperature (°C)
-T_range <- 10 # Temperature range for growth (°C)
+# Sort for cleaner plotting (Oldest blades first)
+blade_population <- blade_population[order(blade_population$start_day), ]
 
-
-# Temperature-dependent growth rate function
-r_temp <- function(T) {
-  r_max * (1 - ((T - T_opt)^2) / (T_range^2))
-}
-
-
-# Logistic growth model with temperature influence
-logistic_growth_temp <- function(t, T) {
-  r_T <- r_temp(T)  # Calculate growth rate for each temperature
-  B_t <- K / (1 + ((K - B0) / B0) * exp(-r_T * t))
-  return(B_t)
-}
-
-# Apply model over time and temperatures
-biomass <- sapply(T, function(temp) logistic_growth_temp(t, temp))
-
-
-# Plot results
-matplot(t, biomass, type = "l", lty = 1, col = rainbow(length(T)),
-        xlab = "Time (months)", ylab = "Biomass (kg)",
-        main = "Temperature-Dependent Logistic Growth")
-legend("bottomright", legend = paste("T =", T, "°C"), col = rainbow(length(T)), lty = 1)
-
-
-# And then we  scale back up to aPatch using our own allometric scaling ... whew. 
-
-
-
-From Pontier et al. 2024:
-Measured growth at 3 sites across 4 years
+# --- 3. ODE FUNCTION (WITH STAGGERED MASK) ---
+grow_kelp_staggered <- function(t, state, pars, env_data, blade_pars) {
+  B_th        <- state[1]
+  B_fr_vector <- state[-1]
   
-Mean growth rates per sampling events across all sites and years:
-Blades : 0.83 ± 0.20 cm/day to 8.25 ± 0.78 cm/day
-stipes : 0.23 ± 0.15 cm/day to 9.31 ± 0.75 cm/day
+  with(as.list(pars), {
+    # Time mapping
+    row_idx  <- max(1, min(floor(t) + 1, nrow(env_data)))
+    real_DOY <- env_data$day[row_idx]
+    
+    # Env Data
+    T_val   <- env_data$Temp[row_idx]
+    I_val   <- env_data$DLI[row_idx]
+    day_h   <- env_data$day_hours[row_idx]
+    night_h <- env_data$night_hours[row_idx]
+    
+    # Scalars
+    fT <- ifelse(T_val <= 10.15, exp(-0.05*(T_val-10.15)^2), exp(-0.64*(T_val-10.15)))
+    fL_blade <- ifelse(I_val < 20, I_val/20, ifelse(I_val > 40, max(0, 1-(I_val-40)/20), 1.0))
+    fT_resp  <- 2.0^((T_val - 10) / 10)
+    
+    # Variable Sloughing
+    current_slough <- slough_min + (slough_max - slough_min) / 
+      (1 + exp(-0.1 * (real_DOY - day_senescence)))
+    
+    # --- ACTIVE MASK ---
+    # Calculates 0 or 1 for every blade based on current time 't'
+    active_mask <- ifelse(t >= blade_pars$start_day, 1, 0)
+    
+    # Stipe Growth
+    stipe_mult <- max(0, (1 - (B_th / K_th)^2))
+    dB_th <- (r_max_th * fT * stipe_mult * B_th) - (slough_rate_th * B_th)
+    
+    # Blade Growth
+    GP_day   <- (blade_pars$max_fix * fT * fL_blade) * day_h
+    GP_night <- (dark_fixation * fT) * night_h 
+    GP_total <- GP_day + GP_night
+    DOC_loss  <- (blade_pars$doc_day * fT * fL_blade * day_h) + (blade_pars$doc_night * fT * night_h)
+    Resp_loss <- GP_total * blade_pars$resp_prop * fT_resp
+    Net_C_Gain <- GP_total - DOC_loss - Resp_loss
+    
+    tissue_growth <- (Net_C_Gain * 1e-6 * 12.011) / dry_to_C
+    
+    # Apply Mask: Inactive blades have 0 growth and 0 sloughing
+    dB_fr_vector <- (tissue_growth * B_fr_vector * active_mask) - 
+      (current_slough * B_fr_vector * active_mask)
+    
+    return(list(c(dB_th, dB_fr_vector)))
+  })
+}
 
+# --- 4. MODEL CONFIG & RUN ---
+model_params <- list(
+  r_max_th = 0.13, dark_fixation = 3.75, DOC_leakage = 0.162, 
+  resp_rate = 0.10, wet_to_dry = 0.13, dry_to_C = 0.15, 
+  K_th = 2.0, slough_rate_th = 0.001,
+  slough_min = 0.002, slough_max = 0.10, day_senescence = 240
+)
 
-aPatch
+# Initial State
+init_B_fr <- rep(0.1, n_blades)
+initial_state <- c(B_th = 0.05, init_B_fr)
 
+# Run ODE
+output <- ode(
+  y = initial_state, 
+  times = 0:(nrow(env_daily)-1), # Ensure this aligns with your env_data rows
+  func = grow_kelp_staggered, 
+  parms = model_params,
+  env_data = env_daily,
+  blade_pars = blade_population
+)
 
-
+# --- 5. PLOT INDIVIDUAL TISSUES (LOG SCALE) ---
+plot_individual_tissues(output, env_daily)
