@@ -39,121 +39,129 @@ input_path <- file.path(DEB_dir, "kelp_project_data.RData" )
 load(input_path)
 
 
-#------------------------- Functions -----------------------------
+#------------------------- ODE Functions -----------------------------
 
-# Updated ODE model with multiple blades and blade variability based on 
-# measured standard errors (Weigel and Pfister)
-grow_kelp_multiple_blades <- function(t, state, pars, env_data, blade_pars) {
-  # state[1] is B_th (Stipe)
-  # state[2:(n+1)] are the individual B_fr values (Blades)
-  B_th        <- state[1]
-  B_fr_vector <- state[-1]
+# Define the nereo growth ODE system. We are growing wet weight using a single frond model.
+# Includes measured growth parameters (Weigel and Pfister 2021) 
+# and adjusted growth rates based on temperature and DLI responses (Pontier et al. 2024)
+grow_kelp_model <- function(t, state, pars, env_data) {
   
-  with(as.list(pars), {
-    
-    # 1. Calculate the ROW INDEX (For looking up data)
-    # This maps simulation time (0, 1, 2) to row number (1, 2, 3)
-    row_idx <- max(1, min(floor(t) + 1, nrow(env_data)))
-    
-    # 2. Extract the REAL Day of Year (DOY)
-    # Requires env_data to have a column named 'day' or 'DOY'
-    real_DOY <- env_data$day[row_idx]
-    
-    T_val   <- env_data$Temp[row_idx]
-    I_val   <- env_data$DLI[row_idx]
-    day_h   <- env_data$day_hours[row_idx]
-    night_h <- env_data$night_hours[row_idx]
-    
-    # --- Environmental Scaling (Pontier et al. 2024) ---
-    # Temperature scaling applies to both stipe and blade ... 
-    fT <- ifelse(T_val <= 10.15, exp(-0.05*(T_val-10.15)^2), exp(-0.64*(T_val-10.15)))
+  B_th <- state[1] # Stipe Biomass
+  B_fr <- state[2] # Total Frond Biomass (The "Canopy")
+  
+  with(as.list(c(pars)), {
+
+  # 1. Calculate the ROW INDEX (For looking up data)
+  # This maps simulation time (0, 1, 2) to row number (1, 2, 3)
+  row_idx <- max(1, min(floor(t) + 1, nrow(env_data)))
+      
+  T_val    <- env_data$Temp[row_idx]
+  I_val    <- env_data$DLI[row_idx]
+  day_h    <- env_data$day_hours[row_idx]
+  night_h  <- env_data$night_hours[row_idx]
+  real_DOY <- env_data$real_DOY[row_idx]
+      
+  # --- Environmental Scaling (Pontier et al. 2024) ---
+  # Temperature scaling applies to both stipe and blade ... 
+  fT <- ifelse(T_val <= 10.15, exp(-0.05*(T_val-10.15)^2), exp(-0.64*(T_val-10.15)))
     # DLI scaling applies to blade only ... 
-    fL_blade <- ifelse(I_val < 20, I_val/20, ifelse(I_val > 40, max(0, 1-(I_val-40)/20), 1.0))
-    # Respiration Scaling (Q10) ... 
-    # R scales thermodynamically (doubles every 10C). T_ref = 10C
-    fT_resp  <- 2.0^((T_val - 10) / 10)
-    
-    # --- Variable sloughing Logic (Sigmoid) ---
-    # Create a smooth transition from low summer sloughing to high fall sloughing
-    # Steepness is set to 0.1 (hardcoded) for a gradual 30-day shift
-    current_slough <- slough_min + (slough_max - slough_min) / 
-      (1 + exp(-0.1 * (real_DOY - day_senescence)))
-    
-    # --- Stipe Growth (Still limited by structural capacity K_th) ---
-    stipe_mult <- max(0, (1 - (B_th / K_th)^2))
-    dB_th      <- r_max_th * fT * stipe_mult * B_th 
-    
-    
-    # --- Stochastic, staggered blade growth logic  ---
-    # Create a vector of 0s and 1s. 
-    # If time 't' < start_day, the blade is "dormant" (0).
-    active_mask <- ifelse(t >= blade_pars$start_day, 1, 0)
-    
-    # GP = Gross Production (umol C / g DW / day) - GP_total is a vector of 1+nblades values
-    # Growth applied to all blades, but dormant ones zeroed out at the end
-    GP_day   <- (blade_pars$max_fix * fT * fL_blade) * day_h
-    GP_night <- (dark_fixation * fT) * night_h 
-    GP_total <- GP_day + GP_night
-    
-    # Exudation and Respiration losses based on measured Std Errors
-    DOC_loss  <- (blade_pars$doc_day * fT * fL_blade * day_h) + 
-      (blade_pars$doc_night * fT * night_h)
-    Resp_loss <- GP_total * blade_pars$resp_prop * fT_resp
-    Net_C_Gain <- GP_total - DOC_loss - Resp_loss # umol C / gDW / day
-    
-    # Conversion to growth rate: (umol C -> mol C -> g C) / (g C / g DW)
-    # 12.011 is the molar mass of Carbon
-    tissue_growth <- (Net_C_Gain * 1e-6 * 12.011) / dry_to_C
-    
-    # --- Final Derivative: Growth - Sloughing ---
-    # APPLY THE MASK: Dormant blades get 0 growth and 0 sloughing
-    dB_fr_vector <- (tissue_growth * B_fr_vector * active_mask) - 
-      (current_slough * B_fr_vector * active_mask)
-    
-    return(list(c(dB_th, dB_fr_vector)))
+  fL_blade <- ifelse(I_val < 20, I_val/20, ifelse(I_val > 40, max(0, 1-(I_val-40)/20), 1.0))
+  
+  #--- Respiration Scaling (Q10). Estimated parameters. 
+  # R scales thermodynamically (doubles every 10C). T_ref = 10C
+  fT_resp  <- Q10_resp^((T_val - T_ref) / 10)
+  
+  # --- Variable sloughing Logic (Sigmoid) ---
+  # Create a smooth transition from low summer sloughing to high fall sloughing
+  # Steepness is set to 0.1 (hardcoded) for a gradual 30-day shift
+  current_slough <- slough_min + (slough_max - slough_min) / 
+    (1 + exp(-0.1 * (real_DOY - senescence_day)))
+  
+  # --- Stipe Growth (limited by structural capacity K_th) ---
+  # We use a multiplier that stays near 1 until B_th gets close to K_th
+  # This reflects the plant reaching the surface and shifting energy to blades
+  stipe_mult <- max(0, (1 - (B_th / K_th)^2))
+  dB_th      <- r_max_th * fT * stipe_mult * B_th 
+      
+  # --- Carbon Dynamics (Weigel & Pfister 2021) ---
+  # Using hourly fixation rates, moderated by ave. daily temperature and DLI, 
+  # multiplied by number of daylight hours = Gross Production (umol C / g DW / day)
+  GP_day     <- max_fixation  * fT  * fL_blade * day_h
+  GP_night   <- dark_fixation * fT *  night_h
+  GP_total   <- GP_day + GP_night
+  
+  # DOC loss (W&P)
+  DOC_loss   <- GP_total * DOC_leakage
+  
+  # --- Respiration Loss including both GP-linked + maintenance) ---
+  # 1) Resp associated with C-fixing, as fraction of gross production
+  # Temperature Q10 regulated by fT_resp (see above)
+  Resp_GP <- GP_total * resp_frac_GP * fT_resp  # umol C / g DW / day
+  
+  # 2) Maintenance respiration (biomass-based)
+  # B's need to be converted to DW to match per-gDW rates
+  B_DW <- (B_th + B_fr) * wet_to_dry  # g DW
+  
+  # Optional seasonal multiplier (0 -> no seasonal effect)
+  # Peaks after senescence_day if maint_seas_amp > 0
+  maint_season_mult <- 1 + maint_seas_amp / (1 + exp(-0.1 * (real_DOY - senescence_day)))
+  
+  # Mass-scaling (linear if maint_size_exp = 1)
+  Resp_maint_total_umolC <- maint_umolC_gDW * fT_resp * maint_season_mult * (B_DW ^ maint_size_exp)
+  
+  # Convert total maintenance respiration (umol C/day) into the same "per gDW per day" basis as GP_total
+  # GP_total is per gDW per day, so to subtract maintenance consistently:
+  Resp_maint <- Resp_maint_total_umolC / pmax(B_DW, 1e-12)  # umol C / g DW / day
+  
+  # Total respiration loss on a per-gDW basis
+  Resp_loss <- Resp_GP + Resp_maint
+  
+  
+  # FINAL ANSWER! 
+  Net_C_Gain_umol <- GP_total - DOC_loss - Resp_loss
+  
+  # BIOMASS ACCUMULATION: Convert umol Carbon gained to wet weight 
+  # Conversion to growth rate: (umol C -> mol C -> g C) / (g C/g DW) / (gDW/gWW)
+  # 12.011 is the molar mass of Carbon
+  tissue_growth <- Net_C_Gain_umol * 1e-6 * 12.011 / gDW_to_gC / wet_to_dry
+  
+  # --- Net Growth (Biomass Change) ---
+  dB_fr <- (tissue_growth * B_fr) - (current_slough * B_fr)
+  
+  # Return the derivatives AND the diagnostic variables
+  # (The first elements of the list must be the derivatives)
+  
+    return(list(c(dB_th, dB_fr), 
+              Gross_Prod_umolC   = GP_total,
+              Net_C_Gain_umolC   = Net_C_Gain_umol,
+              Growth_Rate_Fr_gWW = tissue_growth,
+              resp_umolC_gDW = Resp_loss))
   })
 }
 
-# Generate the geometric schedule for blade emergence. 
-# Calculated for a set of 'blade generations'.
-# Assigns a start_day to each blade. 
-# Blades are added in each step using 2^(Gen-1).
-assign_geometric_start_days <- function(n, interval) {
-  start_days <- numeric(n)
-  count_assigned <- 0
-  generation <- 1
-  
-  while (count_assigned < n) {
-    # How many blades appear in this new wave?
-    # Wave 1 (Gen 1) adds 2 blades (The first split)
-    # Wave 2 (Gen 2) adds 2 more (To reach 4)
-    # Wave 3 (Gen 3) adds 4 more (To reach 8)
-    # Wave 4 (Gen 4) adds 8 more (To reach 16)
-    
-    if (generation == 1) {
-      wave_size <- 2
-    } else {
-      wave_size <- 2^(generation - 1)
-    }
-    
-    # Don't exceed the total n
-    n_actual <- min(wave_size, n - count_assigned)
-    
-    # Calculate the day for this wave
-    # (generation - 1) * interval gives days: 0, 14, 28, 42...
-    current_day <- 1 + ((generation - 1) * interval)
-    
-    # Fill the vector
-    start_index <- count_assigned + 1
-    end_index   <- count_assigned + n_actual
-    start_days[start_index:end_index] <- current_day
-    
-    # Increment
-    count_assigned <- count_assigned + n_actual
-    generation <- generation + 1
-  }
-  return(start_days)
-}
+  # return(list(
+  #   c(dB_th, dB_fr),
+  #   row_idx = row_idx,
+  #   DOY = real_DOY,
+  #   T = T_val,
+  #   DLI = I_val,
+  #   day_h = day_h,
+  #   night_h = night_h,
+  #   fT = fT,
+  #   fL = fL_blade,
+  #   fT_resp = fT_resp,
+  #   GP_day = GP_day,
+  #   GP_night = GP_night,
+  #   GP_total = GP_total,
+  #   DOC_loss = DOC_loss,
+  #   Resp_loss = Resp_loss,
+  #   Net_umol = Net_C_Gain_umol,
+  #   tissue_growth = tissue_growth,        # 1/day (should be ~0.001–0.1, not >>1)
+  #   slough = current_slough,
+  #   net_specific = tissue_growth - current_slough  # net 1/day
+  # ))
+#  })
+#}
 
 
 #---- Support Functions -----
@@ -274,106 +282,175 @@ get_daylight_hours <- function( par ) {
     )
 }
 
-# Post-ODE function to summarize biomass data for plotting
-get_biomass_timeseries <- function(output_df) {
-  # 1. Identify blade columns 
-  # (everything except time and the stipe B_th)
-  blade_cols <- setdiff(names(output_df), c("time", "B_th"))
+
+#--------- Plotting Functions ----------
+
+plot_kelp_biomass <- function(out_df,
+                              time_col="time", bth_col="B_th", bfr_col="B_fr",
+                                 log_y = FALSE) {
+  stopifnot(all(c(time_col, bth_col, bfr_col) %in% names(out_df)))
   
-  # 2. Create the clean wide-format dataframe
-  biomass_data <- output_df %>%
-    mutate(
-      # Sum across the individual stochastic blades for each row
-      Frond_biomass = rowSums(across(all_of(blade_cols))),
-      # Use B_th for stipe
-      Stipe_biomass = B_th,
-      # Total sum
-      Total_biomass = Frond_biomass + Stipe_biomass
-    ) %>%
-    # Select only the specific columns requested
-    select(time, Frond_biomass, Stipe_biomass, Total_biomass)
+  df_long <- data.frame(
+    time    = rep(out_df[[time_col]], 3),
+    biomass = c(out_df[[bfr_col]],
+                out_df[[bth_col]],
+                out_df[[bfr_col]] + out_df[[bth_col]]),
+    series  = factor(rep(c("Frond", "Stipe", "Total"),
+                         each = nrow(out_df)),
+                     levels = c("Frond", "Stipe", "Total"))
+  )
+
+  p <- ggplot2::ggplot(df_long, ggplot2::aes(x = time, y = biomass,
+                                             color = series)) +
+    ggplot2::geom_line(linewidth = 1) +
+    ggplot2::labs(x = "Time (days)",
+                  y = "Biomass (g WW)",
+                  color = NULL,
+                  linetype = NULL) +
+    ggplot2::theme_classic()
   
-  return(biomass_data)
+  if (log_y) {
+    p <- p + ggplot2::scale_y_log10()
+  }
+  
+  p
 }
 
-# Define the kelp growth ODE system
-# Adjusted ODE function based on Table 1 (Pontier et al. 2024)
-simple_grow_kelp_model <- function(t, state, pars, env_data) {
-  with(as.list(c(state, pars)), {
+
+#----  Abandoned multi-blade growth model ----
+grow_kelp_multiple_blades <- function(t, state, pars, env_data, blade_pars) {
+  # state[1] is B_th (Stipe)
+  # state[2:(n+1)] are the individual B_fr values (Blades)
+  B_th        <- state[1]
+  B_fr_vector <- state[-1]
+  
+  with(as.list(pars), {
     
-    # 1. Map time to data index
-    current_day <- floor(t) + 1
-    if (current_day > nrow(env_data)) current_day <- nrow(env_data)
+    # 1. Calculate the ROW INDEX (For looking up data)
+    # This maps simulation time (0, 1, 2) to row number (1, 2, 3)
+    row_idx <- max(1, min(floor(t) + 1, nrow(env_data)))
     
-    T_val <- env_data$Temp[current_day]
-    I_val <- env_data$DLI[current_day]
-    day_h   <- env_data$day_hours[current_day]
-    night_h <- env_data$night_hours[current_day]    
+    # 2. Extract the REAL Day of Year (DOY)
+    # Requires env_data to have a column named 'day' or 'DOY'
+    real_DOY <- env_data$day[row_idx]
     
-    # --- Environmental Limitations from Pontier et al. (2024) ---
-    #   TEMPERATURE: Peak at 10.15C, rapid 64% loss per 1C increase for both
-    #     stipe and blade
-    fT <- ifelse(T_val <= 10.15, 
-                 exp(-0.05 * (T_val - 10.15)^2), 
-                 exp(-0.64 * (T_val - 10.15)))
+    T_val   <- env_data$Temp[row_idx]
+    I_val   <- env_data$DLI[row_idx]
+    day_h   <- env_data$day_hours[row_idx]
+    night_h <- env_data$night_hours[row_idx]
     
-    # DLI effect on BLADE growth: Hump-shaped (Optimum 20-40)
-    fL_blade <- ifelse(I_val < 20, 
-                       I_val / 20, 
-                       ifelse(I_val > 40, 
-                              max(0, 1 - (I_val - 40) / 20),
-                              1.0))
+    # --- Environmental Scaling (Pontier et al. 2024) ---
+    # Temperature scaling applies to both stipe and blade ... 
+    fT <- ifelse(T_val <= 10.15, exp(-0.05*(T_val-10.15)^2), exp(-0.64*(T_val-10.15)))
+    # DLI scaling applies to blade only ... 
+    fL_blade <- ifelse(I_val < 20, I_val/20, ifelse(I_val > 40, max(0, 1-(I_val-40)/20), 1.0))
+    # Respiration Scaling (Q10) ... 
+    # R scales thermodynamically (doubles every 10C). T_ref = 10C
+    fT_resp  <- 2.0^((T_val - 10) / 10)
     
-    # DLI effect on STIPE: Positive linear 
-    fL_stipe <- function(I) {
-      I_min <- 13.3 
-      I_max <- 41.3
-      if (I <= I_min) return(0)
-      return(min(1, (I - I_min) / (I_max - I_min)))
-    }
+    # --- Variable sloughing Logic (Sigmoid) ---
+    # Create a smooth transition from low summer sloughing to high fall sloughing
+    # Steepness is set to 0.1 (hardcoded) for a gradual 30-day shift
+    current_slough <- slough_min + (slough_max - slough_min) / 
+      (1 + exp(-0.1 * (real_DOY - day_senescence)))
     
-    # --- Carbon Dynamics (Weigel & Pfister 2021) ---
-    # Gross Production (umol C / g DW / day)
-    Day_Fixation     <- max_fixation  * fT  * fL_blade * day_h
-    Night_Fixation   <- dark_fixation * fT *  night_h
-    Gross_Production <- Day_Fixation + Night_Fixation
+    # --- Stipe Growth (Still limited by structural capacity K_th) ---
+    stipe_mult <- max(0, (1 - (B_th / K_th)^2))
+    dB_th      <- r_max_th * fT * stipe_mult * B_th 
     
-    # Losses (DOC and Respiration)
-    # W & P suggests respiration is ~10% of gross fixation
-    DOC_loss    <- Gross_Production * DOC_leakage
-    Resp_loss   <- Gross_Production * respiration_rate 
     
-    Net_C_Gain_umol <- Gross_Production - DOC_loss - Resp_loss
+    # --- Stochastic, staggered blade growth logic  ---
+    # Create a vector of 0s and 1s. 
+    # If time 't' < start_day, the blade is "dormant" (0).
+    active_mask <- ifelse(t >= blade_pars$start_day, 1, 0)
     
-    # CONVERT: umol C/g DW -> g C gain / g DW
-    # (1e-6 to get mol, * 12.01 to get grams)
-    gC_per_gDW <- Net_C_Gain_umol * 1e-6 * 12.01
+    # GP = Gross Production (umol C / g DW / day) - GP_total is a vector of 1+nblades values
+    # Growth applied to all blades, but dormant ones zeroed out at the end
+    GP_day   <- (blade_pars$max_fix * fT * fL_blade) * day_h
+    GP_night <- (dark_fixation * fT) * night_h 
+    GP_total <- GP_day + GP_night
     
-    # BIOMASS ACCUMULATION: Convert g Carbon to g Dry Weight
-    specific_growth_rate <- gC_per_gDW / carbon_fraction
+    # Exudation and Respiration losses based on measured Std Errors
+    DOC_loss  <- (blade_pars$doc_day * fT * fL_blade * day_h) + 
+      (blade_pars$doc_night * fT * night_h)
+    Resp_loss <- GP_total * blade_pars$resp_prop * fT_resp
+    Net_C_Gain <- GP_total - DOC_loss - Resp_loss # umol C / gDW / day
     
-    # --- Net Growth (Biomass Change) ---
-    dB_fr <- (specific_growth_rate * B_fr) - (slough_rate_fr * B_fr)
+    # Conversion to growth rate: (umol C -> mol C -> g C) / (g C / g DW)
+    # 12.011 is the molar mass of Carbon
+    tissue_growth <- (Net_C_Gain * 1e-6 * 12.011) / dry_to_C
     
-    # --- Stipe Logic from Potier with Multiplier Slowdown ---
-    # We use a multiplier that stays near 1 until B_th gets close to K_th
-    # This reflects the plant reaching the surface and shifting energy to blades
-    stipe_multiplier <- (1 - (B_th / K_th) ^2) # Squared for a sharper drop-off near the end
-    stipe_multiplier <- max(0, stipe_multiplier) # Ensure it never goes negative
+    # --- Final Derivative: Growth - Sloughing ---
+    # APPLY THE MASK: Dormant blades get 0 growth and 0 sloughing
+    dB_fr_vector <- (tissue_growth * B_fr_vector * active_mask) - 
+      (current_slough * B_fr_vector * active_mask)
     
-    dB_th <- (r_max_th * fT * stipe_multiplier * B_th) - (slough_rate_th * B_th)
-    
-    # Return the derivatives AND the diagnostic variables
-    # (The first elements of the list must be the derivatives)
-    return(list(c(dB_th, dB_fr), 
-                Gross_Prod = Gross_Production,
-                Net_C_Gain = Net_C_Gain_umol,
-                Growth_Rate_Fr = specific_growth_rate))
+    return(list(c(dB_th, dB_fr_vector)))
   })
 }
 
-
-#--------- Plotting Functions ----------
+#---- These plots no longer required with single blade, super-individual
+plot_individual_tissues <- function(ode_output, env_daily, logy = FALSE) {
+  
+  # 1. Convert ODE output to Data Frame
+  df <- as.data.frame(ode_output)
+  
+  # 2. Map 'time' to Dates
+  #    Use match() to align simulation step with environment row
+  df$Date <- env_daily$Date[match(df$time, env_daily$day)]
+  
+  # 3. Extract Stipe Data (Column 2)
+  stipe_col_name <- colnames(df)[2]
+  stipe_df <- df %>%
+    select(Date, Biomass = all_of(stipe_col_name)) %>%
+    mutate(Tissue = "Stipe")
+  
+  # 4. Extract Blade Data (Columns 3 to End)
+  blade_cols <- colnames(df)[3:(ncol(df)-1)] # Exclude 'Date'
+  
+  blade_df <- df %>%
+    select(Date, all_of(blade_cols)) %>%
+    pivot_longer(cols = -Date, names_to = "Blade_ID", values_to = "Biomass") %>%
+    mutate(Tissue = "Blade")
+  
+  # 5. Define a helper for comma formatting (replacing scales::label_comma)
+  comma_fmt <- function(x) {
+    format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+  }
+  
+  # 6. Base Plot
+  p <- ggplot() +
+    # A. Blades (Thin Green Lines)
+    geom_line(data = blade_df, 
+              aes(x = Date, y = Biomass, group = Blade_ID), 
+              color = "forestgreen", size = 0.3, alpha = 0.5) +
+    
+    # B. Stipe (Thick Brown Line)
+    geom_line(data = stipe_df, 
+              aes(x = Date, y = Biomass), 
+              color = "sienna", size = 1.5) +
+    
+    # C. X-Axis Formatting
+    scale_x_date(date_labels = "%b %d", date_breaks = "2 weeks") +
+    theme_minimal()
+  
+  # 7. Apply Log vs Linear Scale
+  if (logy) {
+    p <- p + 
+      scale_y_log10(labels = comma_fmt) +
+      labs(title = "Individual Tissue Biomass (Log Scale)",
+           subtitle = "Visualizing staggered emergence",
+           y = "Biomass (g DW) - Log10", x = "Date")
+  } else {
+    p <- p + 
+      scale_y_continuous(labels = comma_fmt) + 
+      labs(title = "Individual Tissue Biomass (Linear Scale)",
+           subtitle = "Visualizing total mass contribution",
+           y = "Biomass (g DW)", x = "Date")
+  }
+  
+  return(p)
+}
 plot_blade_distribution <- function(output_df) {
   # 1. Extract the final time step
   final_step <- output_df[nrow(output_df), ]
@@ -404,35 +481,6 @@ plot_blade_distribution <- function(output_df) {
   
   return(p)
 }
-
-plot_kelp_biomass <- function(bio_df) {
-  # 1. Transform the data to "Long Format" for ggplot2
-  # This moves the biomass types into a single column for easy color mapping
-  plot_data <- bio_df %>%
-    pivot_longer(cols = c(Frond_biomass, Stipe_biomass, Total_biomass),
-                 names_to = "Component",
-                 values_to = "Biomass")
-  
-  # 2. Create the plot
-  p <- ggplot(plot_data, aes(x = time, y = Biomass, color = Component )) +
-    geom_line(size = 1.1) +
-    # Custom colors: Green for Fronds, Brown for Stipe, Black for Total
-    scale_color_manual(values = c("Frond_biomass" = "green", 
-                                  "Stipe_biomass" = "chocolate4", 
-                                  "Total_biomass" = "black")) +
-    
-    labs(title = "Kelp Biomass Accumulation Over Time",
-         subtitle = "Comparison of structural stipe and photosynthetic fronds",
-         x = "Day of Year",
-         y = "Dry Weight Biomass (g)" ) + #,
-    #         color = "Plant Component",
-    #         linetype = "Plant Component") +
-    theme_minimal() +
-    theme(legend.position = "bottom")
-  
-  return(p)
-}
-
 plot_kelp_dynamics <- function(bio_df, env_daily, sen_day = 240) {
   
   # 1. Get the full Date sequence from env_daily
@@ -491,52 +539,46 @@ plot_kelp_dynamics <- function(bio_df, env_daily, sen_day = 240) {
   
   return(p)
 }
-
-plot_individual_tissues <- function(ode_output, env_daily) {
+# Generate the geometric schedule for blade emergence. 
+# Calculated for a set of 'blade generations'.
+# Assigns a start_day to each blade. 
+# Blades are added in each step using 2^(Gen-1).
+assign_geometric_start_days <- function(n, interval) {
+  start_days <- numeric(n)
+  count_assigned <- 0
+  generation <- 1
   
-  # 1. Convert ODE output to Data Frame
-  df <- as.data.frame(ode_output)
-  
-  # 2. Map 'time' to Dates
-  #    Use match() to align simulation step with environment row
-  df$Date <- env_daily$Date[match(df$time, env_daily$day)]
-  
-  # 3. Extract Stipe Data (Column 2)
-  stipe_col_name <- colnames(df)[2]
-  stipe_df <- df %>%
-    select(Date, Biomass = all_of(stipe_col_name)) %>%
-    mutate(Tissue = "Stipe")
-  
-  # 4. Extract Blade Data (Columns 3 to End)
-  #    Pivot longer to get distinct lines for each blade
-  blade_cols <- colnames(df)[3:(ncol(df)-1)] # Exclude 'Date'
-  
-  blade_df <- df %>%
-    select(Date, all_of(blade_cols)) %>%
-    pivot_longer(cols = -Date, names_to = "Blade_ID", values_to = "Biomass") %>%
-    mutate(Tissue = "Blade")
-  
-  # 5. Plot with Log10 Scale
-  p <- ggplot() +
-    # A. Blades (Thin Green Lines)
-    geom_line(data = blade_df, 
-              aes(x = Date, y = Biomass, group = Blade_ID), 
-              color = "forestgreen", size = 0.3, alpha = 0.5) +
+  while (count_assigned < n) {
+    # How many blades appear in this new wave?
+    # Wave 1 (Gen 1) adds 2 blades (The first split)
+    # Wave 2 (Gen 2) adds 2 more (To reach 4)
+    # Wave 3 (Gen 3) adds 4 more (To reach 8)
+    # Wave 4 (Gen 4) adds 8 more (To reach 16)
     
-    # B. Stipe (Thick Brown Line)
-    geom_line(data = stipe_df, 
-              aes(x = Date, y = Biomass), 
-              color = "sienna", size = 1.5) +
+    if (generation == 1) {
+      wave_size <- 2
+    } else {
+      wave_size <- 2^(generation - 1)
+    }
     
-    # C. Log Scale Transformation
-    scale_y_log10(labels = scales::label_comma()) + 
+    # Don't exceed the total n
+    n_actual <- min(wave_size, n - count_assigned)
     
-    # D. Formatting
-    scale_x_date(date_labels = "%b %d", date_breaks = "2 weeks") +
-    labs(title = "Individual Tissue Biomass (Log Scale)",
-         subtitle = "Visualizing the staggered emergence of blade cohorts",
-         y = "Biomass (g DW) - Log10 Scale", x = "Date") +
-    theme_minimal()
-  
-  return(p)
+    # Calculate the day for this wave
+    # (generation - 1) * interval gives days: 0, 14, 28, 42...
+    current_day <- 1 + ((generation - 1) * interval)
+    
+    # Fill the vector
+    start_index <- count_assigned + 1
+    end_index   <- count_assigned + n_actual
+    start_days[start_index:end_index] <- current_day
+    
+    # Increment
+    count_assigned <- count_assigned + n_actual
+    generation <- generation + 1
+  }
+  return(start_days)
 }
+
+#----
+# FIN.

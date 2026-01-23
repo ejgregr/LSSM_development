@@ -34,72 +34,49 @@ PAR_env  <- data.frame( "Datestamp" = par_df$Timestamp, "PAR" = par_df$mean, "SD
 env_daily <- make_env_daily( DLI_env, temp_env )
 head(env_daily)
 
+#Add real DOY for plotting etc.
+env_daily <- cbind(env_daily, "real_DOY" = as.integer(format(as.Date(env_daily$Datestamp), "%j")) )
+#  real_DOY <- env_data$day[row_idx]
+
 # Daylight hours for the days in env_daily 
 day_hours <- get_daylight_hours( PAR_env )
+#plot(env_daily$DLI)
 
 # Join daylight hours to available daily environmental data 
 env_daily <- env_daily %>%
   left_join(day_hours, by = "Datestamp")
 
 
-#---- Nereo growth parameters (older) ----
-# B_init      <- 0.025  # Initial mass of sporophyte (est. at 25 mg based on ChatGPT)
-# B_max       <- 9.23   # Max biomass for an adult Nereo. Calculated from field results (Weigel and Pfister 2021)
-# r_max       <- 0.065  # Maximum daily growth rate, assuming 6 month growth and mature plant is 9.23 kg 
-# sp_start    <- 0.005  # Established sporophyte mass (5 g)
-# wet_to_dry  <- 0.13   # Water content of Nereo (Bullen et al. 2024)
-# dry_to_C    <- 0.25   # Carbon content of Nereo (dry) (Bullen et al. 2024)
-# 
-# #---- Environmental influence on growth rate
-# T_opt     <- 10        # Optimal temperature (°C)
-# T_max     <- 14        # Maximal temperature for growth (°C)
-# DLI_opt   <- 30        # Optimal DLI in mol/m2/day
-# DLI_range <- 20        # Range (+/-) that allows growth in mol/m2/day 
 
-
-
-
-#-------------- Run the ODE model  ---------------------------------
+head(env_daily)
+#-------------- Load and run the ODE model  ---------------------
 source( "LSSM_ODE.R" )
-
-#----- First view of output  ----- 
 out_df <- as.data.frame( output )
-bio_df <- get_biomass_timeseries( out_df )
-kelp_plot <- plot_kelp_biomass(bio_df)
-print(kelp_plot)
+out_df$time <- env_daily$real_DOY
 
-
-
+names( out_df )
+out_df[1:20,]
 #-------------- Visualization and diagnostics ---------------------------------
-
-#Ensure output has multiple blades 
-ncol( output )
-
-
-plot_individual_tissues(output, env_daily)
+#----- First view of output  ----- 
+#plot_kelp_biomass(out_df ) 
+plot_kelp_biomass(out_df, log=T ) 
 
 
-first_blade_day1 <- output[2, 3]
-last_blade_day1  <- output[2, ncol(output)]
 
-final_row <- output[nrow(output), ]
-manual_frond_sum <- sum(final_row[3:ncol(output)])
-stipe_val <- final_row[2]
+#--- Diagnostics
 
-#----- Visualization using output as a df ----- 
-out_df <- as.data.frame( output )
+plot(out_df$fL)
 
-#--- 
-bio_df <- get_biomass_timeseries( out_df )
-kelp_plot <- plot_kelp_biomass(bio_df)
-print(kelp_plot)
+dt <- c(NA, diff(out_df$time))
 
+plot(out_df$net_specific)
 
-#--- Show blade distribution  ---
-p_dist <- plot_blade_distribution( out_df )
-print(p_dist)
+cum_log_growth <- cumsum(ifelse(is.na(dt), 0, out_df$net_specific * dt))
 
+plot(cum_log_growth)
 
+head(out_df)
+bio_df <- out_df
 # --- Plot kelp with sloughing ---
 # Add real DOY to bio_df
 start_day <- env_daily$day[1] # e.g., 135
@@ -108,14 +85,17 @@ bio_df$Real_DOY <- bio_df$time + start_day
 plot_kelp_dynamics(bio_df, env_daily, sen_day = 240)
 
 
-
+#--- Check slough rate vs. blade light limitation 
+plot(out_df$time, out_df$fL, type="l", xlab="day", ylab="fL_blade")
+plot(out_df$time, out_df$slough, type="l", xlab="day", ylab="current_slough (1/day)")
+plot(out_df$time, out_df$Growth_Rate_Fr - out_df$slough, type="l",
+     xlab="day", ylab="net specific rate (1/day)")
+abline(h=0, lty=2)
 
 
 
 #---- Part 3: Calculate chemistry changes during  growing season ----
 source( "LSSM_chemistry.R" )
-
-
 
 
 
