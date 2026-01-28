@@ -1,16 +1,22 @@
 model_params <- list(
-  r_max_th       = 0.13,  # Max daily rate of stipe growth (a proxy for proportion increase per day, based on Pontier's cm/day)
-  max_fixation   = 120.78,# Max observed umol C/gDW/h in June - Weigel and Pfister
-  dark_fixation  = 3.75,  # Light indepdt nighttime fixation (C/gDW/h) - Weigel and Pfister
-  DOC_leakage_d  = 0.162, # Ave of daily fixed carbon lost as DOC - W & P
+  # Frond dynamics
+  max_fixation   = 120.78, # Max observed umol C/gDW/h in June - Weigel and Pfister
+  dark_fixation  = 3.75,   # Light indepdt nighttime fixation (C/gDW/h) - Weigel and Pfister
+  DOC_leakage_d  = 0.162,  # Ave of daily fixed carbon lost as DOC - W & P
   respired_prod  = 0.15,   # was respired_d
   R_maint_umolC_gDW_h = 0, # set/fit later
-  gDW_to_gC      = 0.313, # Estimated. RSSM says 0.313. 
-  wet_to_dry     = 0.13,  # From RSSM.
-  K_th           = 5,     # The biomass (g WW) at which stipe stops growing
   slough_min     = 0.005,  # Min slough rate for blades (early)
-  slough_max     = 0.05,  # Max slough rate for blades (late)
-  senescence_day = 240    # The day (approx late August) when loss ramps up
+  slough_max     = 0.05,   # Max slough rate for blades (late)
+  senescence_day = 240,    # The day (approx late August) when loss ramps up
+  
+  # Stipe dynamics
+#  r_max_th = 0.13, # Max daily rate of stipe growth (a proxy for proportion increase per day, based on Pontier's cm/day)
+  a_th_fr = 0.5,   # coefficient a. 
+  b_th_fr = 1.0,   # exponent b. 
+  k_th    = 0.3,    # enough to prevent chronic stipe lag, but not instantaneous
+  # Constants
+  gDW_to_gC      = 0.313, # Estimated. RSSM says 0.313. 
+  wet_to_dry     = 0.13  # From RSSM.
 )
 
 # 3. Define initial state (start with small kelp plant)
@@ -41,7 +47,7 @@ out_df <- cbind( out_df, "B_th_WW" = out_df$B_th/model_params$wet_to_dry,
 plot_kelp_biomass_WW(out_df, log=F ) 
 
 head(out_df)
-
+out_df[130,]
 # TO DO: CHeck the temp curve - Starts funny. 
 plot( out_df$B_fr )
 plot( out_df$fL )
@@ -79,25 +85,19 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     real_DOY <- env_data$real_DOY[row_idx]
     
     # --- Environmental Scaling (Pontier et al. 2024) ---
-    # Temperature scaling applies to both stipe and blade, Light only to blade. 
-    # fT <- ifelse(T_C <= 10.15,
-    #              exp(-0.05 * (T_C - 10.15)^2),
-    #              exp(-0.64 * (T_C - 10.15)))
-    # 
-    # fL <- ifelse(DLI < 20, DLI/20,
-    #              ifelse(DLI > 40, max(0, 1 - (DLI - 40)/20), 1.0))
-    # 
-    # # Restrict degree of environmental scaling (debugging)
-    # fL <- max( fL, 0.5)
-    # fT <- max( fT, 0.5)
-    
     fT <- fT_reparam(T_C)
     fL <- fL_reparam(DLI)
     
-    # --- STIPE growth. r_max_th is based on observed growth (Pontier et al. 2024)
-    # K_th is in g ww so convert. 
-    stipe_mult <- max(0, 1 - ( B_th / (K_th * wet_to_dry) )^2)
-    dB_th      <- r_max_th * fT * stipe_mult * B_th  # g DW / day
+    # --- STIPE growth using an allometric (per Starko and Martone 2016)
+    # r_max_th is based on observed growth (Pontier et al. 2024)
+
+    # target stipe biomass 
+    B_th_target <- a_th_fr * (B_fr^b_th_fr)
+    # Avoid division by zero at very small fronds
+    B_th_target <- max(B_th_target, 1e-9)
+    # Apply allometric relaxation to target 
+    dB_th <- k_th * fT * max(0, B_th_target - B_th)
+    
     
     # --- Mass-specific FROND fixation rates 
     # (g DW per hour) -> per g DW per day ---
@@ -128,10 +128,8 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     # µmol C -> mol C -> g C -> g DW
     tissue_growth <- NetC_umolC * 1e-6 * 12.011 / gDW_to_gC
     
-    
     # --- Net Growth (Biomass Change) ---
     dB_fr <- tissue_growth - (slough_today * B_fr)
-    
     
     return(list(
       c(dB_th, dB_fr),
@@ -254,14 +252,9 @@ plot_fT_curve <- function(T_opt = 10.0, warm_loss_per_C = 0.23,
     theme_classic()
 }
 
-plot_fL_curve <- function(
-    L_low = 20,
-    L_high = 40,
-    low_loss_per_10 = 0.23,
-    high_loss_per_10 = 0.23,
-    DLI_min = 0,
-    DLI_max = 70,
-    DLI_step = 0.5
+plot_fL_curve <- function(L_low = 20, L_high = 40, 
+                          low_loss_per_10 = 0.23, high_loss_per_10 = 0.23,
+                          DLI_min = 0, DLI_max = 70, DLI_step = 0.5
 ) {
   df <- data.frame(DLI = seq(DLI_min, DLI_max, by = DLI_step))
   df$fL <- fL_reparam(
@@ -282,6 +275,7 @@ plot_fL_curve <- function(
     coord_cartesian(ylim = c(0, 1)) +
     theme_classic()
 }
+
 
 
 
@@ -337,6 +331,8 @@ fL_reparam <- function(DLI,
   # Keep bounded [0,1]
   pmax(0, pmin(1, out))
 }
+
+
 
 
 
