@@ -2,28 +2,40 @@ model_params <- list(
   # Frond dynamics
   max_fixation   = 120.78, # Max observed umol C/gDW/h in June - Weigel and Pfister
   dark_fixation  = 3.75,   # Light indepdt nighttime fixation (C/gDW/h) - Weigel and Pfister
-  DOC_leakage_d  = 0.162,  # Ave of daily fixed carbon lost as DOC - W & P
-  respired_prod  = 0.15,   # was respired_d
+  respired_prod  = 0.15,   # 
   R_maint_umolC_gDW_h = 0, # set/fit later
-  slough_min     = 0.005,  # Min slough rate for blades (early)
+  slough_min     = 0.0,    # Min slough rate for blades (early)
   slough_max     = 0.05,   # Max slough rate for blades (late)
   senescence_day = 240,    # The day (approx late August) when loss ramps up
+  senescence_k   = 0.05,   # Rate of senescence increase. .05 ~ a 60 day ramp up
+  # DOC leakage as fraction of GP during DAY: decreases with light (DLI)
+  # Based on Weigel and Pfister
+  DOC_day_max = 0.24,   # low-light PER (e.g., ~0.23–0.24)
+  DOC_day_min = 0.08,   # high-light PER (e.g., ~0.08)
+  DOC_DLI50   = 43,     # Calc'd from DLI distributional data
+  DOC_DLI_k   = 0.15,   # Calc'd from DLI distributional data
+#  DOC_DLI50   = 30,     # DLI at midpoint of decline (mol m^-2 d^-1)
+#  DOC_DLI_k   = 0.25,   # steepness (per DLI unit)
+
+  # Night DOC leakage (simple assumption): fraction of night GP
+  DOC_night_frac = 0.10, # tune later; keep small under non–nutrient-limited assumption  
   
   # Stipe dynamics
-#  r_max_th = 0.13, # Max daily rate of stipe growth (a proxy for proportion increase per day, based on Pontier's cm/day)
   a_th_fr = 0.5,   # coefficient a. 
   b_th_fr = 1.0,   # exponent b. 
-  k_th    = 0.3,    # enough to prevent chronic stipe lag, but not instantaneous
+  k_th    = 0.3,   # enough to prevent chronic stipe lag, but not instantaneous
+
   # Constants
-  gDW_to_gC      = 0.313, # Estimated. RSSM says 0.313. 
-  wet_to_dry     = 0.13  # From RSSM.
+  gDW_to_gC    = 0.313, # Estimated. RSSM says 0.313. 
+  wet_to_dry   = 0.13,  # From RSSM.
+  alpha_water  = 0.06  # Fraction of DLI reflected at water surface
 )
 
 # 3. Define initial state (start with small kelp plant)
 # Starting biomass based on young sporophyte with established first blade = 1 to 4 g WW total.
 initial_state <- c(
-  B_th = 1.0 * model_params$wet_to_dry,  # Stated value for stipe mass in (g WW)
-  B_fr = 1.5 * model_params$wet_to_dry   # Stated value for frond mass in (g WW)
+  B_th = 2 * model_params$wet_to_dry,  # Stated value for stipe mass in (g WW)
+  B_fr = 3 * model_params$wet_to_dry   # Stated value for frond mass in (g WW)
 )
 
 # 4. Define time sequence grow_kelp(from day 1 to day 100)
@@ -43,12 +55,22 @@ out_df <- as.data.frame( output )
 out_df <- cbind( out_df, "B_th_WW" = out_df$B_th/model_params$wet_to_dry,
                          "B_fr_WW" = out_df$B_fr/model_params$wet_to_dry)
 
+names( out_df )
+out_df$DLI
+
 #plot_kelp_biomass_DW(out_df, log=T ) 
 plot_kelp_biomass_WW(out_df, log=F ) 
 
+
+plot_C_losses( out_df, log_y=T )
+
 head(out_df)
 out_df[130,]
-# TO DO: CHeck the temp curve - Starts funny. 
+out_df[,c(1,11,12)]
+names(out_df)
+
+
+
 plot( out_df$B_fr )
 plot( out_df$fL )
 plot( out_df$slough_today )
@@ -62,6 +84,15 @@ plot_fL_curve()
 
 plot_temperature_scaling( env_daily )
 plot_DLI_scaling( env_daily )
+
+
+min( env_daily$DLI )
+median( env_daily$DLI )
+max( env_daily$DLI )
+
+
+x <- (1 - 0.1) * env_daily$DLI
+median(x)
 
 
 
@@ -79,10 +110,12 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     row_idx <- max(1, min(floor(t) + 1, nrow(env_data)))
     
     T_C      <- env_data$Temp[row_idx]
-    DLI      <- env_data$DLI[row_idx]
     day_h    <- env_data$day_hours[row_idx]
     night_h  <- env_data$night_hours[row_idx]
     real_DOY <- env_data$real_DOY[row_idx]
+    
+    # DLI - adjusted for reflectance
+    DLI <- (1 - alpha_water) * env_data$DLI[row_idx]
     
     # --- Environmental Scaling (Pontier et al. 2024) ---
     fT <- fT_reparam(T_C)
@@ -98,48 +131,73 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     # Apply allometric relaxation to target 
     dB_th <- k_th * fT * max(0, B_th_target - B_th)
     
-    
     # --- Mass-specific FROND fixation rates 
     # (g DW per hour) -> per g DW per day ---
     
-    GP_night_umolC_gDW <- dark_fixation * fT * night_h
     GP_day_umolC_gDW   <- max_fixation  * fT * fL * day_h
+    GP_night_umolC_gDW <- dark_fixation * fT * night_h
     GP_umolC_gDW       <- GP_day_umolC_gDW + GP_night_umolC_gDW
     
-    # --- Senescence - variable sloughing Logic (Sigmoid) ---
-    # Create a smooth transition from low summer sloughing to high fall sloughing
-    # Steepness is set to 0.1 (hardcoded) for a gradual 30-day shift
-    slough_today <- slough_min + (slough_max - slough_min) / 
-      (1 + exp(-0.1 * (real_DOY - senescence_day)))
+    # And now translate to the Carbon fixed this day (for DOC leakage, below)
+    GP_day_umolC   <- B_fr * GP_day_umolC_gDW
+    GP_night_umolC <- B_fr * GP_night_umolC_gDW
+    GP_umolC       <- GP_day_umolC + GP_night_umolC
+
+     # --- DOC Leakage - variable as a function of light (W&P)
+    # Define a daily fraction
+    DOC_day_frac <- DOC_day_min + (DOC_day_max - DOC_day_min) /
+      (1 + exp(DOC_DLI_k * (DLI - DOC_DLI50)))
+    # Bound to [0,1]
+    DOC_day_frac <- max(0, min(1, DOC_day_frac))
     
-    # Turn off sloughing  (debugging)
-    #slough_today <- 0
+    # Calculate the DOC
+    DOC_day_umolC   <- DOC_day_frac   * GP_day_umolC
+    DOC_night_umolC <- DOC_night_frac * GP_night_umolC
+    DOC_umolC       <- DOC_day_umolC + DOC_night_umolC
     
-    # Convert to TOTAL fluxes for fronds (photosynthetic tissue)
-    GP_umolC  <- B_fr          * GP_umolC_gDW
-    DOC_umolC <- DOC_leakage_d * GP_umolC # proportion fixed lost as DOC
-    R_prod_umolC  <- respired_prod * GP_umolC # proportion fixed respired
+    #--- Calculate respiration proportion
+    R_prod_umolC  <- respired_prod * GP_day_umolC # proportion of daily C fixing
     R_maint_umolC <- R_maint_umolC_gDW_h * fT * 24 * (B_fr + B_th) # Maintenance respiration
     
     # Net µmol fixed for this simulated day
     NetC_umolC <- GP_umolC - DOC_umolC - R_prod_umolC - R_maint_umolC  
 
-    # Convert total net C -> total biomass gain (DW)
+    
+    # --- Senescence - variable sloughing Logic (Sigmoid)
+    # Create a smooth transition from low summer sloughing to high fall sloughing
+    # Steepness is set to 0.1 (hardcoded) for a gradual 30-day shift
+    slough_today <- slough_min + (slough_max - slough_min) / 
+      (1 + exp(-senescence_k * (real_DOY - senescence_day)))
+    
+    # Turn off sloughing  (debugging)
+    slough_today <- 0
+    # Convert frond sloughing (g DW/day) to µmol C/day for C-budget plotting
+    Slough_gDW <- slough_today * B_fr
+    Slough_umolC <- Slough_gDW * gDW_to_gC / 12.011 * 1e6
+    
+        # Convert total net C -> total biomass gain (DW)
     # µmol C -> mol C -> g C -> g DW
     tissue_growth <- NetC_umolC * 1e-6 * 12.011 / gDW_to_gC
     
     # --- Net Growth (Biomass Change) ---
     dB_fr <- tissue_growth - (slough_today * B_fr)
     
+    # as.numeric() ensures name stays as defined. ode() oddity.
     return(list(
       c(dB_th, dB_fr),
-      GP_umolC_gDW = GP_umolC_gDW,
-      NetC_umolC   = NetC_umolC,
+      real_DOY = real_DOY,
       fL = fL, 
       fT = fT,
-      slough_today = slough_today,
-      R_prod_umolC  = R_prod_umolC,
-      R_maint_umolC = R_maint_umolC
+      DLI = DLI,
+      GP_day_umolC    = as.numeric(GP_day_umolC),     # Carbon fixed during day
+      GP_night_umolC  = as.numeric(GP_night_umolC),   # Carbon fixed during night
+      GP_umolC        = as.numeric(GP_umolC),         # Total carbon fixed 
+      DOC_umolC       = as.numeric(DOC_umolC),        # total DOC loss
+      DOC_day_umolC   = as.numeric(DOC_day_umolC),    # day time DOC loss
+      DOC_night_umolC = as.numeric(DOC_night_umolC),  # night time loss
+      Slough_umolC    = as.numeric(Slough_umolC),     # total DOC loss
+      R_prod_umolC    = as.numeric(R_prod_umolC),     # Respiration from production
+      R_maint_umolC   = as.numeric(R_maint_umolC)     # Respiration from maintenance
     ))
   })
 }
@@ -147,6 +205,43 @@ grow_kelp_model <- function(t, state, pars, env_data) {
 
 
 #---- Plotting functions ----
+
+plot_C_losses <- function(df, time_col = "real_DOY", log_y = FALSE) {
+  
+  # Required columns
+  req <- c( time_col, "GP_umolC", "DOC_umolC", "R_prod_umolC","R_maint_umolC","Slough_umolC" )
+  missing <- setdiff(req, names(df))
+  if (length(missing) > 0) {
+    stop("Missing columns in data frame: ", paste(missing, collapse = ", "))
+  }
+  
+  # Build long format
+  long <- rbind(
+    data.frame(real_DOY = df[[time_col]], flux_type = "Gross production",        umolC = df$GP_umolC),
+    data.frame(real_DOY = df[[time_col]], flux_type = "DOC leakage",             umolC = df$DOC_umolC),
+    data.frame(real_DOY = df[[time_col]], flux_type = "Production respiration",  umolC = df$R_prod_umolC),
+    data.frame(real_DOY = df[[time_col]], flux_type = "Maintenance respiration", umolC = df$R_maint_umolC),
+    data.frame(real_DOY = df[[time_col]], flux_type = "Sloughing (as C)",        umolC = df$Slough_umolC)
+  )
+  
+  p <- ggplot2::ggplot(long, ggplot2::aes(x = real_DOY, y = umolC, color = flux_type)) +
+    ggplot2::geom_line(linewidth = 1) +
+    ggplot2::labs(
+      x = "Day of Year",
+      y = expression(mu*"mol C d"^-1),
+      color = NULL
+    ) +
+    ggplot2::theme_classic()
+  
+  if (log_y) {
+    p <- p + ggplot2::scale_y_log10()
+  }
+  
+  return(p)
+}
+
+
+
 
 # Takes temp from env_daily df, calculates and plots associated scaling factor
 plot_temperature_scaling <- function( env_dat ){
@@ -278,7 +373,6 @@ plot_fL_curve <- function(L_low = 20, L_high = 40,
 
 
 
-
 #--- ChatGPT functions to scale T and DLI effects according to Pontier et al. ----
 
 # --- Helper: convert "p% change per unit" into exponential rate constant ---
@@ -305,9 +399,9 @@ fT_reparam <- function(T_C,
 # Approx ~23% gain per +10 DLI near ~20 (low-light side) and ~23% loss per +10 above ~40 (high-light side) :contentReference[oaicite:2]{index=2}
 fL_reparam <- function(DLI,
                        L_low = 20,
-                       L_high = 40,
+                       L_high = 60, # was 40
                        low_gain_per_10 = 0.23,   # interpreted as "being 10 below optimal costs ~23%"
-                       high_loss_per_10 = 0.23) {
+                       high_loss_per_10 = 0.10) {  # was 23
   
   # Convert to multipliers:
   # low side: at (L_low - 10) -> multiplier ~ (1 - 0.23) = 0.77
