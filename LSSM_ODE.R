@@ -17,8 +17,7 @@
 # Define parameters (initial estimates, tune these with the paper data)
 model_params <- list(
   r_max_th       = 0.13,    # Max daily rate of stipe growth (assume proportional to Pontier's cm/day)
-#  max_fixation   = 120.78,  # Max observed umol C/g/h in June - Weigel and Pfister
-  max_fixation   =    78.5,  # Mean observed umol C/g/h in June - Weigel and Pfister
+  max_fixation   = 120.78,  # Max observed umol C/g/h in June - Weigel and Pfister
   dark_fixation  = 3.75,    # Light indepdt nighttime fixation (C/g/h) - Weigel and Pfister
   DOC_leakage    = 0.162,   # Ave of daily fixed carbon lost as DOC - W & P
   
@@ -39,6 +38,7 @@ model_params <- list(
 )
 
 # 3. Define initial state (start with small kelp plant)
+# 
 initial_state <- c(
   B_th = 0.50,  # initial stipe mass (g WW)
   B_fr = 0.75   # initial frond mass (g WW)

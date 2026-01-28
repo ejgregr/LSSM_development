@@ -51,15 +51,15 @@ grow_kelp_model <- function(t, state, pars, env_data) {
   
   with(as.list(c(pars)), {
 
-  # 1. Calculate the ROW INDEX (For looking up data)
-  # This maps simulation time (0, 1, 2) to row number (1, 2, 3)
+  # 1. Calculate ROW INDEX for looking up data. Need to 
+  # map simulation time (0, 1, 2) to row number (1, 2, 3)
   row_idx <- max(1, min(floor(t) + 1, nrow(env_data)))
       
   T_val    <- env_data$Temp[row_idx]
   I_val    <- env_data$DLI[row_idx]
   day_h    <- env_data$day_hours[row_idx]
   night_h  <- env_data$night_hours[row_idx]
-  real_DOY <- env_data$real_DOY[row_idx]
+  real_DOY <- env_data$real_DOY[row_idx]     # real DOY calculated outside
       
   # --- Environmental Scaling (Pontier et al. 2024) ---
   # Temperature scaling applies to both stipe and blade ... 
@@ -285,7 +285,40 @@ get_daylight_hours <- function( par ) {
 
 #--------- Plotting Functions ----------
 
-plot_kelp_biomass <- function(out_df,
+
+plot_kelp_biomass_WW <- function(out_df,
+                              time_col="time", bth_col="B_th_WW", bfr_col="B_fr_WW",
+                              log_y = FALSE) {
+  stopifnot(all(c(time_col, bth_col, bfr_col) %in% names(out_df)))
+  
+  df_long <- data.frame(
+    time    = rep(out_df[[time_col]], 3),
+    biomass = c(out_df[[bfr_col]],
+                out_df[[bth_col]],
+                out_df[[bfr_col]] + out_df[[bth_col]]),
+    series  = factor(rep(c("Frond", "Stipe", "Total"),
+                         each = nrow(out_df)),
+                     levels = c("Frond", "Stipe", "Total"))
+  )
+  
+  p <- ggplot2::ggplot(df_long, ggplot2::aes(x = time, y = biomass,
+                                             color = series)) +
+    ggplot2::geom_line(linewidth = 1) +
+    ggplot2::labs(x = "Time (days)",
+                  y = "Biomass (g WW)",
+                  color = NULL,
+                  linetype = NULL) +
+    ggplot2::theme_classic()
+  
+  if (log_y) {
+    p <- p + ggplot2::scale_y_log10()
+  }
+  
+  p
+}
+
+
+plot_kelp_biomass_DW <- function(out_df,
                               time_col="time", bth_col="B_th", bfr_col="B_fr",
                                  log_y = FALSE) {
   stopifnot(all(c(time_col, bth_col, bfr_col) %in% names(out_df)))
@@ -304,7 +337,7 @@ plot_kelp_biomass <- function(out_df,
                                              color = series)) +
     ggplot2::geom_line(linewidth = 1) +
     ggplot2::labs(x = "Time (days)",
-                  y = "Biomass (g WW)",
+                  y = "Biomass (g DW)",
                   color = NULL,
                   linetype = NULL) +
     ggplot2::theme_classic()

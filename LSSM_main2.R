@@ -7,7 +7,7 @@
 ## Updates: 
 # Newly available data include
 #   1. currents (speed and direction) for two tidal model sites
-#   2. DLI from sattelite to better reflect growing conditions
+#   2. DLI from satelite to better reflect growing conditions
 #       NOTE: this fixed the DLI which now matches the values reported by Pontier.
 #
 #################################################################################
@@ -61,6 +61,7 @@ out_df[1:20,]
 #plot_kelp_biomass(out_df ) 
 plot_kelp_biomass(out_df, log=T ) 
 
+plot( out_df$B_fr ~ out_df$time  ) 
 
 
 #--- Diagnostics
