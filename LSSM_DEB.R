@@ -3,136 +3,205 @@
 # Created: November 2025
 ## Purpose: Run a simple Dynamic Energy Budget model, written by ChatGPT
 # Notes: Not a DEB, but a more sophisticated, 2-part logistic growth model
+# Updated: Jan 2026. 
+#   Deterministic (i.e., logistic growth) model not very satisfying. Updated
+#   this with a 'DEB-like' model that uses Ordinary Differential Equations to 
+#   predict growth based on light and temperature. 
+#   Nutrients are assumed to be not limiting - a significant assumption.
+#   Uses data from Weigel and Pfister (2021) to partition and parameterize 
+#   carbon fixation, respiration, and DOC production.
+#   Data from Pontier et al. (2023) used to attenuate growth as a function of 
+#   temperature and light levels. 
 #============================================================================
 
-#---- FUNCTIONS ----
 
-# Plot grams DW of fronds, stipe, and total
-FullKelpPlot <- function ( kelp_out ) {
-# Example: assuming your model output is called kelp_out
-plot( as.Date(kelp_out$days), kelp_out$B_gDW,
-      type = "l", lwd = 3, col = "darkgreen",
-      xlab = "Date", ylab = "Biomass (g DW)",
-      main = "Nereocystis Biomass Dynamics")
+#----------------------------------
+# Jan 27: EVERYTHING in DW please. 
+# Define the nereo growth ODE system. We are growing wet weight using a single frond model.
+# Includes measured growth parameters (Weigel and Pfister 2021) 
+# and adjusted growth rates for temp and DLI responses (Pontier et al. 2024)
+grow_kelp_model <- function(t, state, pars, env_data) {
+  
+  B_th <- state[1]  # g DW
+  B_fr <- state[2]  # g DW
+  
+  with(as.list(pars), {
+    
+    # 1. Calculate ROW INDEX for looking up data.
+    # Need to map simulation time (0, 1, 2) to row number (1, 2, 3)
+    row_idx <- max(1, min(floor(t) + 1, nrow(env_data)))
+    
+    T_C      <- env_data$Temp[row_idx]
+    day_h    <- env_data$day_hours[row_idx]
+    night_h  <- env_data$night_hours[row_idx]
+    real_DOY <- env_data$real_DOY[row_idx]
+    
+    # DLI - adjusted for reflectance
+    DLI <- (1 - alpha_water) * env_data$DLI[row_idx]
+    
+    # --- Environmental Scaling (Pontier et al. 2024) ---
+    fT <- fT_reparam(T_C, T_opt, sigma_warm)
+    fL <- fL_reparam(DLI)
+    
+    # --- STIPE growth using an allometric (per Starko and Martone 2016)
 
-lines(as.Date(kelp_out$days), kelp_out$B_stipe_gDW,
-      col = "brown", lwd = 2, lty = 2)
-
-lines(as.Date(kelp_out$days), kelp_out$B_fronds_gDW,
-      col = "forestgreen", lwd = 2, lty = 3)
-
-legend("topleft",
-       legend = c("Total", "Stipe", "Fronds"),
-       col = c("darkgreen", "brown", "forestgreen"),
-       lty = c(1, 2, 3), lwd = 2, bty = "n")
+    # target stipe biomass 
+    B_th_target <- a_th_fr * (B_fr^b_th_fr)
+    # Avoid division by zero at very small fronds
+    B_th_target <- max(B_th_target, 1e-9)
+    # Apply allometric relaxation to target 
+    dB_th <- k_th * fT * max(0, B_th_target - B_th)
+    
+    # --- Mass-specific FROND fixation rates 
+    # (g DW per hour) -> per g DW per day ---
+    
+    GP_day_umolC_gDW   <- max_fixation  * fT * fL * day_h
+    GP_night_umolC_gDW <- dark_fixation * fT * night_h
+    GP_umolC_gDW       <- GP_day_umolC_gDW + GP_night_umolC_gDW
+    
+    # And now translate to the Carbon fixed this day (for DOC leakage, below)
+    GP_day_umolC   <- B_fr * GP_day_umolC_gDW
+    GP_night_umolC <- B_fr * GP_night_umolC_gDW
+    GP_umolC       <- GP_day_umolC + GP_night_umolC
+    
+    # --- DOC Leakage - variable as a function of light (W&P)
+    # Define a daily fraction
+    DOC_day_frac <- DOC_day_min + (DOC_day_max - DOC_day_min) /
+      (1 + exp(DOC_DLI_k * (DLI - DOC_DLI50)))
+    # Bound to [0,1]
+    DOC_day_frac <- max(0, min(1, DOC_day_frac))
+    
+    # Calculate the DOC
+    DOC_day_umolC   <- DOC_day_frac   * GP_day_umolC
+    DOC_night_umolC <- DOC_night_frac * GP_night_umolC
+    DOC_umolC       <- DOC_day_umolC + DOC_night_umolC
+    
+    #--- Calculate respiration proportion
+    R_prod_umolC  <- respired_prod * GP_day_umolC # proportion of daily C fixing
+    R_maint_umolC <- R_maint_umolC_gDW_h * fT * 24 * (B_fr + B_th) # Maintenance respiration
+    
+    # Net µmol fixed for this simulated day
+    NetC_umolC <- GP_umolC - DOC_umolC - R_prod_umolC - R_maint_umolC  
+    
+    
+    # --- Senescence - variable sloughing Logic (Sigmoid)
+    # Create a smooth transition from low summer sloughing to high fall sloughing
+    # Steepness is set to 0.1 (hardcoded) for a gradual 30-day shift
+    slough_today <- slough_min + (slough_max - slough_min) / 
+      (1 + exp(-senescence_k * (real_DOY - senescence_day)))
+    
+    # Turn off sloughing  (debugging)
+    # slough_today <- 0
+    
+    # Convert frond sloughing (g DW/day) to µmol C/day for C-budget plotting
+    Slough_gDW <- slough_today * B_fr
+    Slough_umolC <- Slough_gDW * gDW_to_gC / 12.011 * 1e6
+    
+    # Convert total net C -> total biomass gain (DW)
+    # µmol C -> mol C -> g C -> g DW
+    tissue_growth <- NetC_umolC * 1e-6 * 12.011 / gDW_to_gC
+    
+    # --- Net Growth (Biomass Change) ---
+    dB_fr <- tissue_growth - (slough_today * B_fr)
+    
+    # as.numeric() ensures name stays as defined. ode() oddity.
+    return(list(
+      c(dB_th, dB_fr),
+      real_DOY = real_DOY,
+      fL = fL, 
+      fT = fT,
+      DLI = DLI,
+      GP_day_umolC    = as.numeric(GP_day_umolC),     # Carbon fixed during day
+      GP_night_umolC  = as.numeric(GP_night_umolC),   # Carbon fixed during night
+      GP_umolC        = as.numeric(GP_umolC),         # Total carbon fixed 
+      DOC_umolC       = as.numeric(DOC_umolC),        # Total DOC loss
+      DOC_day_umolC   = as.numeric(DOC_day_umolC),    # Day time DOC loss
+      DOC_night_umolC = as.numeric(DOC_night_umolC),  # Night time DOC loss
+      Slough_umolC    = as.numeric(Slough_umolC),     # Total slough loss
+      R_prod_umolC    = as.numeric(R_prod_umolC),     # Respiration from production
+      R_maint_umolC   = as.numeric(R_maint_umolC)     # Respiration from maintenance
+    ))
+  })
 }
 
-#--- Fourth model - Separates stipe and canopy growth.
-grow_kelp4 <- function(df,
-                       # ---- Biomass book-keeping ----
-                       Bt_init = 0.005,              # g DW initial stipe
-                       Bf_init = 0.5,                # g DW initial fronds (when triggered)
-                       B_max_wet = 9230,             # g wet ~9.23 kg
-                       wet_to_dry = 0.13,
-                       dry_to_C = 0.25,
-                       alpha = 1.0,                  # fraction of new dry mass that is carbon
-                       
-                       # ---- Growth kinetics ----
-                       r_max_th = 0.2,
-                       r_max_fr = 0.15,              # initial estimate = 0.065 based on earlier math
-                       T_min = 4, T_opt = 8, T_max = 14,
-                       k_L = 10,
-                       
-                       # ---- Logistic caps ----
-                       stipe_max_frac = 0.20,
-                       frond_start_gDW  = 1,          # stipe mass needed to begin fronds
-                       
-                       # ---- Losses ----
-                       slough_rate_th = 0.0,
-                       slough_rate_fr = 0.01
-) {
+
+model_params <- list(
+  # Frond dynamics
+  max_fixation   = 120.78, # Max observed umol C/gDW/h in June - Weigel and Pfister
+  dark_fixation  = 3.75,   # Light indepdt nighttime fixation (C/gDW/h) - Weigel and Pfister
+  respired_prod  = 0.15,   # 
+  R_maint_umolC_gDW_h = 0.05, # set/fit later
+  slough_min     = 0.001,   # Min slough rate for blades (early)
+  slough_max     = 0.01,   # Max slough rate for blades (late)
+  senescence_day = 240,    # The day (approx late August) when loss ramps up
+  senescence_k   = 0.025,   # Rate of senescence increase. .05 ~ a 60 day ramp up
+
+    # DOC leakage as fraction of GP during DAY: decreases with light (DLI)
+  # Based on Weigel and Pfister
+  DOC_day_max = 0.24,   # low-light PER (e.g., ~0.23–0.24)
+  DOC_day_min = 0.08,   # high-light PER (e.g., ~0.08)
+  DOC_DLI50   = 43,     # Calc'd from DLI distributional data
+  DOC_DLI_k   = 0.15,   # Calc'd from DLI distributional data
+  #  DOC_DLI50   = 30,     # DLI at midpoint of decline (mol m^-2 d^-1)
+  #  DOC_DLI_k   = 0.25,   # steepness (per DLI unit)
   
-  n <- nrow(df)
-  stopifnot(all(c("days","temp","salt","DLI") %in% names(df)))
+  # Night DOC leakage (simple assumption): fraction of night GP
+  DOC_night_frac = 0.10, # tune later; keep small under non–nutrient-limited assumption  
   
-  # Convert caps
-  B_max_dry <- B_max_wet * wet_to_dry        # total DW
-  B_th_cap  <- stipe_max_frac * B_max_dry  # max stipe DW
+  # Temperature restriction based on Pontier et al. 
+  # To span Pontier’s stated range: sigma_warm ~ 0.75 (steep penalty),  1.7 (mild  penalty)
+  T_opt      = 10,
+  sigma_warm = 1.5,
   
-  # Storage
-  B_th <- numeric(n)
-  B_fr <- numeric(n)
+  # Stipe dynamics
+  a_th_fr = 0.5,   # coefficient a. 
+  b_th_fr = 1.0,   # exponent b. 
+  k_th    = 0.3,   # enough to prevent chronic stipe lag, but not instantaneous
   
-  # ---- Initialize correctly ----
-  B_th[1] <- min(Bt_init, B_th_cap)
-  B_fr[1] <- 0   # fronds start later
-  
-  # Tracking
-  r_eff_th <- numeric(n)
-  r_eff_fr <- numeric(n)
-  fT_vec   <- numeric(n)
-  fL_vec   <- numeric(n)
-  
-  # Limiter functions
-  fT <- function(T){
-    if (T <= T_min || T >= T_max) return(0)
-    ((T - T_min)/(T_opt - T_min)) * ((T_max - T)/(T_max - T_opt))
-  }
-  fL <- function(I){ I / (I + k_L) }
-  
-  # ---- Time loop ----
-  for (i in 2:n) {
-    T  <- df$temp[i]
-    I  <- df$DLI[i]
-    FT <- fT(T)
-    FL <- fL(I)
-    
-    # --- stipe growth ---
-    r_th <- r_max_th * FT
-    growth_th <- B_th[i-1] * r_th * (1 - B_th[i-1] / B_th_cap)   # logistic
-    loss_th   <- slough_rate_th * B_th[i-1]
-    B_th[i]   <- max(0, min(B_th_cap, B_th[i-1] + growth_th - loss_th))
-    
-    # --- Frond growth ---
-    frond_on <- B_th[i] >= frond_start_gDW
-    
-    # Trigger fronds EXACTLY once
-    if (frond_on && B_fr[i-1] == 0) {
-      B_fr[i-1] <- Bf_init
-    }
-    
-    B_total_prev <- B_th[i-1] + B_fr[i-1]
-    
-    logistic_term <- (1 - B_total_prev / B_max_dry)
-    logistic_term <- max(0, logistic_term)   # prevent negative logistic
-    
-    r_fr <- if (frond_on) r_max_fr * FT * FL else 0
-    growth_fr <- B_fr[i-1] * r_fr * logistic_term
-    loss_fr   <- slough_rate_fr * B_fr[i-1]
-    
-    # enforce total biomass cap
-    B_fr_raw <- B_fr[i-1] + growth_fr - loss_fr
-    B_fr[i] <- max(0, min(B_max_dry - B_th[i], B_fr_raw))
-    
-    # Store growth modifiers
-    r_eff_th[i] <- r_th
-    r_eff_fr[i] <- r_fr
-    fT_vec[i]   <- FT
-    fL_vec[i]   <- FL
-  }
-  
-  # ---- Build output ----
-  df$B_stipe_gDW <- B_th
-  df$B_fronds_gDW  <- B_fr
-  df$B_gDW         <- B_th + B_fr
-  df$B_kgWW        <- (df$B_gDW / wet_to_dry) / 1000
-  
-  df$r_eff_th <- r_eff_th
-  df$r_eff_fr <- r_eff_fr
-  df$fT       <- fT_vec
-  df$fL       <- fL_vec
-  
-  df
-}
+  # Constants
+  gDW_to_gC    = 0.313, # Estimated. RSSM says 0.313. 
+  wet_to_dry   = 0.13,  # From RSSM.
+  alpha_water  = 0.06  # Fraction of DLI reflected at water surface
+)
+
+# 3. Define initial state (start with small kelp plant)
+# Starting biomass based on young sporophyte with established first blade = 1 to 4 g WW total.
+initial_state <- c(
+  B_th = 1 * model_params$wet_to_dry,  # Stated value for stipe mass in (g WW)
+  B_fr = 2 * model_params$wet_to_dry   # Stated value for frond mass in (g WW)
+)
+
+# 4. Define time sequence grow_kelp(from day 1 to day 100)
+times <- env_daily$day
+
+# 5. Solve the ODE system using the 'ode' function
+output <- ode(
+  y = initial_state,
+  times = times,
+  func = grow_kelp_model,
+  parms = model_params,
+  env_data = env_daily,
+  method = "rk4" # Runge-Kutta 4th order method
+)
+
+out_df <- as.data.frame( output )
+out_df <- cbind( out_df, "B_th_WW" = out_df$B_th/model_params$wet_to_dry,
+                         "B_fr_WW" = out_df$B_fr/model_params$wet_to_dry)
+
+
+
+### Fin.
+
+
+
+
+
+
+
+
+
+
+
+
 
 

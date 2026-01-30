@@ -68,7 +68,7 @@ alpha_mix <- setNames(volume_df$VerticalMix, volume_df$BoxName)
 alpha_mix <- setNames( c(0, 0, 0, 0, 0, 0), volume_df$BoxName )
 
 #---- Load kelp growth ---- 
-# Use saved kelp growth time series (see LSSM_DEB.r, LSSM_growth.R vestigial but still some good piences?)
+# Use saved kelp growth time series (see LSSM_DEB.r, LSSM_growth.R vestigial but still some good pieces?)
 kelp_grow <- read.csv(paste0( DEB_dir, "/kelp_grow_Nov15.csv") )
 
 kelp_uptake <- generate_kelp_DIC_uptake(kelp_grow, 10000)

@@ -7,9 +7,10 @@
 ## Updates: 
 # Newly available data include
 #   1. currents (speed and direction) for two tidal model sites
-#   2. DLI from satelite to better reflect growing conditions
+#   2. DLI from satellite to better reflect growing conditions
 #       NOTE: this fixed the DLI which now matches the values reported by Pontier.
-#
+# Jan29: Nice stable, parameterized version of LSSM 'DEB'. Easy to run and 
+#   ready for chemistry.
 #################################################################################
 
 rm(list=ls(all=T)) # Erase environment.
@@ -24,7 +25,8 @@ start_date <- "2023-05-04 00:00:00 PDT"
 end_date   <- "2023-10-11 00:00:00 PDT"
 
 #---- Part 1: Load and prep environmental drivers ----
-# Loads temperature, salinity, CO2, and oxygen from moorings
+# Loads temperature, salinity, CO2, and oxygen from moorings, 
+# as well as light (as DLI and PAR).
 source( "LSSM_config2.R" )
 
 #---- Environmental data prep --------
@@ -36,7 +38,6 @@ head(env_daily)
 
 #Add real DOY for plotting etc.
 env_daily <- cbind(env_daily, "real_DOY" = as.integer(format(as.Date(env_daily$Datestamp), "%j")) )
-#  real_DOY <- env_data$day[row_idx]
 
 # Daylight hours for the days in env_daily 
 day_hours <- get_daylight_hours( PAR_env )
@@ -46,57 +47,48 @@ day_hours <- get_daylight_hours( PAR_env )
 env_daily <- env_daily %>%
   left_join(day_hours, by = "Datestamp")
 
-
-
 head(env_daily)
-#-------------- Load and run the ODE model  ---------------------
-source( "LSSM_ODE.R" )
-out_df <- as.data.frame( output )
-out_df$time <- env_daily$real_DOY
 
+# Test temp effect on growth
+env_daily$Temp <- env_daily$Temp - 2
+plot( env_daily$Temp )
+
+#----------------------- Load and run the ODE model  ---------------------------
+source( "LSSM_DEB.R" )
+
+#---------------------- Visualization and diagnostics --------------------------
 names( out_df )
-out_df[1:20,]
-#-------------- Visualization and diagnostics ---------------------------------
-#----- First view of output  ----- 
-#plot_kelp_biomass(out_df ) 
-plot_kelp_biomass(out_df, log=T ) 
-
-plot( out_df$B_fr ~ out_df$time  ) 
+plot_kelp_biomass_WW(out_df, log=F ) 
 
 
-#--- Diagnostics
+# Jan29: Reasonably well parameterized, except DOC leakage and respiration
+# fall of the cliff with higher temps (beyond 12C). This is new with the Gaussian
+# updated fT curve. But it is also reasonable, and logical give the T constraint.
+# Check into this later, with respect to field temps and moorings. 
+# Chat says to Increase sigma_warm until: fT ≈ 0.3–0.5 at late-season temperatures
+plot_C_losses( out_df, log_y=T )
 
-plot(out_df$fL)
-
-dt <- c(NA, diff(out_df$time))
-
-plot(out_df$net_specific)
-
-cum_log_growth <- cumsum(ifelse(is.na(dt), 0, out_df$net_specific * dt))
-
-plot(cum_log_growth)
-
-head(out_df)
-bio_df <- out_df
-# --- Plot kelp with sloughing ---
-# Add real DOY to bio_df
-start_day <- env_daily$day[1] # e.g., 135
-bio_df$Real_DOY <- bio_df$time + start_day
-
-plot_kelp_dynamics(bio_df, env_daily, sen_day = 240)
+out_df
 
 
-#--- Check slough rate vs. blade light limitation 
-plot(out_df$time, out_df$fL, type="l", xlab="day", ylab="fL_blade")
-plot(out_df$time, out_df$slough, type="l", xlab="day", ylab="current_slough (1/day)")
-plot(out_df$time, out_df$Growth_Rate_Fr - out_df$slough, type="l",
-     xlab="day", ylab="net specific rate (1/day)")
-abline(h=0, lty=2)
+plot_fT_curve( model_params$T_opt, model_params$sigma_warm )
+
+
+plot_fL_curve()
+plot_temperature_scaling( env_daily )
+plot_DLI_scaling( env_daily )
+summary(fT_reparam(env_daily$Temp))
+
+
+
 
 
 
 #---- Part 3: Calculate chemistry changes during  growing season ----
 source( "LSSM_chemistry.R" )
+
+
+
 
 
 
