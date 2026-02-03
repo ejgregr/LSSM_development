@@ -9,7 +9,7 @@
 # check for any required packages that aren't installed and install them
 required.packages <- c( "ggplot2", "reshape2", "lubridate", "dplyr", "stringr",
                         "rmarkdown","knitr", "tinytex", "kableExtra", #currently causing trouble.
-                        "seacarb", "gsw", "deSolve", "tidyr")
+                        "seacarb", "gsw", "deSolve", "tidyr", "readxl")
 
 # Other packages that might be useful. 
 # "tidyr", "raster", "stringr", "rasterVis",
@@ -33,6 +33,7 @@ bc_time <- 'America/Vancouver'
 data_dir <- "C:/Data/Git/LSSM_development/Data"
 DEB_dir  <- "C:/Data/Git/LSSM_water_analysis/Results"
 PDF_dir  <- "C:/Data/Git/LSSM_development/PDF" # for Markdown script
+source_dir <- "C:/Data/Git/LSSM_water_analysis/Source_data"
 
 # Load 2025 observational data. 
 input_path <- file.path(DEB_dir, "kelp_project_data.RData" )

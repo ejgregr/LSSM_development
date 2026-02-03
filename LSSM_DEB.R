@@ -14,6 +14,8 @@
 #   temperature and light levels. 
 #============================================================================
 
+#--- REQUIRES
+# env_daily() - a df describing growing conditions.
 
 #----------------------------------
 # Jan 27: EVERYTHING in DW please. 
@@ -83,6 +85,10 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     # Net µmol fixed for this simulated day
     NetC_umolC <- GP_umolC - DOC_umolC - R_prod_umolC - R_maint_umolC  
     
+    # Convert total net C -> total biomass gain (DW)
+    # µmol C -> mol C -> g C -> g DW
+    tissue_growth <- NetC_umolC * 1e-6 * 12.011 / gDW_to_gC
+    
     
     # --- Senescence - variable sloughing Logic (Sigmoid)
     # Create a smooth transition from low summer sloughing to high fall sloughing
@@ -97,9 +103,6 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     Slough_gDW <- slough_today * B_fr
     Slough_umolC <- Slough_gDW * gDW_to_gC / 12.011 * 1e6
     
-    # Convert total net C -> total biomass gain (DW)
-    # µmol C -> mol C -> g C -> g DW
-    tissue_growth <- NetC_umolC * 1e-6 * 12.011 / gDW_to_gC
     
     # --- Net Growth (Biomass Change) ---
     dB_fr <- tissue_growth - (slough_today * B_fr)
@@ -111,6 +114,7 @@ grow_kelp_model <- function(t, state, pars, env_data) {
       fL = fL, 
       fT = fT,
       DLI = DLI,
+      net_daily_gDW   = as.numeric(dB_fr),        # net g DW added to the plant this day
       GP_day_umolC    = as.numeric(GP_day_umolC),     # Carbon fixed during day
       GP_night_umolC  = as.numeric(GP_night_umolC),   # Carbon fixed during night
       GP_umolC        = as.numeric(GP_umolC),         # Total carbon fixed 
@@ -184,10 +188,9 @@ output <- ode(
   method = "rk4" # Runge-Kutta 4th order method
 )
 
-out_df <- as.data.frame( output )
-out_df <- cbind( out_df, "B_th_WW" = out_df$B_th/model_params$wet_to_dry,
-                         "B_fr_WW" = out_df$B_fr/model_params$wet_to_dry)
-
+kelp_df <- as.data.frame( output )
+kelp_df <- cbind( kelp_df, "B_th_WW" = kelp_df$B_th/model_params$wet_to_dry,
+                           "B_fr_WW" = kelp_df$B_fr/model_params$wet_to_dry)
 
 
 ### Fin.

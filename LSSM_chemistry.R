@@ -13,12 +13,263 @@
 # Ferry Data uses is "calibrated_SW_xCO2_dry"
 # ## Updates: 
 # 2025/11/13: Updated after restructing the data loading and parameter prep. 
+# 2026/01/30: Revisiting process to more closely link to empirical work 
 #################################################################################
 
 #----- Examine chemistry based on output of plant growth model -----
 
-str(kelp_grow)
-head(daily_ocean)
+#---- Required inputs:
+
+# Kelp growth
+str(kelp_df)
+
+# Discrete samples to support inside/outside pH comparison
+# Copy loading data from LSSM_Water_Quality.prj. discrete_sample_loading.R
+
+# SOURCE modified during development to deal with inconsistent data:
+#   RPtoRK : 2 codes for the same site
+#   _B     : Dropped one CP replicate from May 13
+x <- read_excel( paste0( source_dir, '/Discrete_sample_data/discrete_data_for_model_development_RPtoRK_B.xls' ))
+
+# Pull and simplify names of a relevant subset of data
+disc_data <- x[, c("Station_ID", "Collection_Date", "Collection_Time_PST",
+                           "NIST_Temp", "YSI_S", "TA (umol/kg)", "pCO2@insituT (uatm)", "pH (total)")]
+colnames(disc_data) <- c("Station", "Date", "Time", "Temp", "Salt", "TA", "pCO2", "pH")
+head(disc_data)
+
+#Fix Temp
+disc_data$Temp <- as.numeric(disc_data$Temp)
+# Adjust and format Date and Time columns
+# Convert Excel fractional day value -> seconds -> 24 hr time
+disc_data$Time <- hms::hms(round(as.numeric(disc_data$Time) * 86400))
+# Format date
+disc_data$Date <- as.Date(disc_data$Date)
+# Add DateTime column
+disc_data$DateTime <- as.POSIXct(disc_data$Date) + disc_data$Time
+
+# Standardize station names 
+#   Replace 'in' with '_In' and 'out' with '_Out' at the end of station names
+disc_data$Station <- gsub("\\s*[iI][nN]$", "_In", disc_data$Station)
+disc_data$Station <- gsub("\\s*[oO][uU][tT]$", "_Out", disc_data$Station)
+
+# Check dataframe
+head( disc_data )
+class( disc_data )
+
+#--- Working with kelp bed pairs, first pull all In and Outs.
+#  Parse site and in/out flag from Station
+inout_data <- disc_data %>%
+  mutate(
+    Site = str_remove(Station, "_(In|Out)$"),
+    IO   = case_when(
+      str_detect(Station, "_In$")  ~ "In",
+      str_detect(Station, "_Out$") ~ "Out",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # Keep only rows with valid suffix
+  filter(!is.na(IO))
+
+head( inout_data )
+str( inout_data )  
+
+
+
+# Next concrete step:
+# 1) compute DIC and TA from (pH, pCO2, T, S) using seacarb::carb()
+# 2) summarize In vs Out per site (mean, sd, n)
+# 3) compute delta (Out - In) in DIC and pH for each site
+# 4) quick plot of delta DIC by site
+
+# df must contain: Site, IO (In/Out), Temp, Salt, pH, pCO2
+# pCO2 assumed in µatm, Temp in °C, Salt in PSU
+
+add_dic_from_ta_ph <- function(df) {
+  res <- seacarb::carb(
+    flag = 8,          # TA + pH given
+    var1 = df$pH,      # pH (default seacarb scale, as you requested)
+    var2 = df$TA,      # TA (µmol/kg)
+    S    = df$Salt,
+    T    = df$Temp,
+    Patm = 1,
+    P    = 1,    # Set for internal consistency
+    Pt   = 0,    # Set for internal consistency
+    Sit  = 0     # Set for internal consistency
+  )
+  df$DIC <- res$DIC    # µmol/kg
+  df
+}
+
+summarize_in_out <- function(df) {
+  
+  req_vars <- c("Site", "IO", "Temp", "Salt", "TA", "pH", "pCO2")
+  
+  df_clean <- df %>%
+    dplyr::select(all_of(req_vars)) %>%
+    tidyr::drop_na()
+  
+  if (nrow(df_clean) < nrow(df)) {
+    message("Dropped ", nrow(df) - nrow(df_clean),
+            " rows with missing carbonate inputs.")
+  }
+  
+  df2 <- add_dic_from_ta_ph(df_clean)
+  
+  # Summary by site x IO (this stays as-is)
+  summ <- df2 %>%
+    dplyr::group_by(Site, IO) %>%
+    dplyr::summarise(
+      n = dplyr::n(),
+      Temp_mean = mean(Temp),
+      Salt_mean = mean(Salt),
+      
+      TA_mean = mean(TA),
+      TA_sd   = sd(TA),
+      
+      pH_mean = mean(pH),
+      pH_sd   = sd(pH),
+      
+      pCO2_mean = mean(pCO2),
+      pCO2_sd   = sd(pCO2),
+      
+      DIC_mean = mean(DIC),
+      DIC_sd   = sd(DIC),
+      .groups = "drop"
+    )
+  
+  # ---- Deltas table (one row per Site) ----
+  deltas <- summ %>%
+    dplyr::select(Site, IO, n, Temp_mean, Salt_mean, TA_mean, pH_mean, pCO2_mean, DIC_mean) %>%
+    tidyr::pivot_wider(
+      id_cols = c(Site),                 # force one row per Site
+      names_from = IO,
+      values_from = c(n, Temp_mean, Salt_mean, TA_mean, pH_mean, pCO2_mean, DIC_mean),
+      names_sep = "_"
+    ) %>%
+    dplyr::mutate(
+      d_TA   = TA_mean_Out   - TA_mean_In,
+      d_pH   = pH_mean_Out   - pH_mean_In,
+      d_pCO2 = pCO2_mean_Out - pCO2_mean_In,
+      d_DIC  = DIC_mean_Out  - DIC_mean_In
+    )
+  
+  list(df_with_dic = df2, summary = summ, deltas = deltas)
+}
+
+plot_delta_DIC <- function(deltas_df) {
+  ggplot(deltas_df, aes(x = Site, y = d_DIC)) +
+    geom_col() +
+    labs(
+      x = "Site",
+      y = expression(Delta*"DIC (Out - In, "*mu*"mol kg"^-1*")")
+    ) +
+    theme_classic()
+}
+
+plot_dic_boxplots <- function(df_with_dic) {
+  
+  ggplot(df_with_dic, aes(x = Site, y = DIC, fill = IO)) +
+    geom_boxplot(outlier.shape = 21, alpha = 0.8) +
+    labs(
+      x = "Site",
+      y = expression("DIC ("*mu*"mol kg"^-1*")"),
+      fill = NULL
+    ) +
+    theme_classic() +
+    theme(
+      legend.position = "top"
+    )
+}
+
+add_DIC_no_grouping <- function(df) {
+  
+  # Required variables for this workflow (TA-based closure)
+  req_vars <- c("Site", "IO", "Temp", "Salt", "TA", "pH", "pCO2")
+  
+  df_clean <- df %>%
+    dplyr::select(all_of(req_vars)) %>%
+    tidyr::drop_na()
+  
+  if (nrow(df_clean) < nrow(df)) {
+    message("Dropped ", nrow(df) - nrow(df_clean),
+            " rows with missing carbonate inputs.")
+  }
+  
+  # Compute DIC from TA + pH
+  df2 <- add_dic_from_ta_ph(df_clean)
+  df2
+}
+
+plot_dic_delta_boxplots <- function(df_with_dic) {
+  
+  # Expect columns: Site, Date, IO (In/Out), DIC
+  req <- c("Site", "Date", "IO", "DIC")
+  missing <- setdiff(req, names(df_with_dic))
+  if (length(missing) > 0) {
+    stop("Missing required columns: ", paste(missing, collapse = ", "))
+  }
+  
+  # Pair In/Out by Site + Date
+  paired <- df_with_dic %>%
+    select(Site, Date, IO, DIC) %>%
+    pivot_wider(
+      names_from = IO,
+      values_from = DIC
+    ) %>%
+    drop_na(In, Out) %>%
+    mutate(
+      d_DIC = Out - In
+    )
+  
+  if (nrow(paired) == 0) {
+    stop("No valid In/Out pairs found after pairing.")
+  }
+  
+  ggplot(paired, aes(x = Site, y = d_DIC, fill = Site)) +
+    geom_boxplot(alpha = 0.8, outlier.shape = 21) +
+    labs(
+      x = "Site",
+      y = expression(Delta*"DIC (Out - In, "*mu*"mol kg"^-1*")")
+    ) +
+    theme_classic() +
+    theme(
+      legend.position = "none"
+    )
+}
+
+
+
+
+# ---- Run ----
+results <- summarize_in_out(inout_data)
+
+results$summary
+results$deltas
+names( results$deltas )
+plot_delta_DIC(results$deltas)
+
+
+#--- looking a bit closer ... 
+
+x <- add_DIC_no_grouping(inout_data)
+head(x)
+plot_dic_boxplots( x )
+plot_dic_delta_boxplots( x )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # carb() uses flags to ID inputs. Of interest here:
 
 flag_CA <- 24 # pCO2 and Alkalinity 
@@ -41,6 +292,10 @@ plot( kelp_grow$days, molDIC_fixed )
 delkDIC <- c( 0, diff( molDIC_fixed )) 
 #NOTE: Length is now day_stamps-1
 plot( kelp_grow$days, delkDIC, ylab = "mol DIC fixed / day" )
+
+
+
+
 
 #----- Part 3b) Ambient DIC and baseline pH
 

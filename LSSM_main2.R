@@ -54,19 +54,22 @@ env_daily$Temp <- env_daily$Temp - 2
 plot( env_daily$Temp )
 
 #----------------------- Load and run the ODE model  ---------------------------
+# uses dataframe env_daily
 source( "LSSM_DEB.R" )
-
+# creates dataframe kelp_df
 #---------------------- Visualization and diagnostics --------------------------
-names( out_df )
-plot_kelp_biomass_WW(out_df, log=F ) 
+names( kelp_df )
+plot_kelp_biomass_WW(kelp_df, log=F ) 
+plot( kelp_df$net_daily_gDW)
 
+head( kelp_df )
 
 # Jan29: Reasonably well parameterized, except DOC leakage and respiration
 # fall of the cliff with higher temps (beyond 12C). This is new with the Gaussian
 # updated fT curve. But it is also reasonable, and logical give the T constraint.
 # Check into this later, with respect to field temps and moorings. 
 # Chat says to Increase sigma_warm until: fT ≈ 0.3–0.5 at late-season temperatures
-plot_C_losses( out_df, log_y=T )
+plot_C_losses(kelp_df, log_y=T )
 
 out_df
 
@@ -80,14 +83,8 @@ plot_DLI_scaling( env_daily )
 summary(fT_reparam(env_daily$Temp))
 
 
-
-
-
-
 #---- Part 3: Calculate chemistry changes during  growing season ----
 source( "LSSM_chemistry.R" )
-
-
 
 
 
