@@ -9,7 +9,7 @@
 # check for any required packages that aren't installed and install them
 required.packages <- c( "ggplot2", "reshape2", "lubridate", "dplyr", "stringr",
                         "rmarkdown","knitr", "tinytex", "kableExtra", #currently causing trouble.
-                        "seacarb", "gsw", "deSolve", "tidyr", "readxl")
+                        "seacarb", "gsw", "deSolve", "tidyr", "readxl", "akima" )
 
 # Other packages that might be useful. 
 # "tidyr", "raster", "stringr", "rasterVis",
