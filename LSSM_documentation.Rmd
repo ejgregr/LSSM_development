@@ -39,20 +39,26 @@ NB: Sometimes kable makes trouble. In which case, may need to re-install as upda
 \newpage
 
 # Overview
-This document summarises the analyses done in R to support the Broughton Local Seaweed Services Model (LSSM) (aka *"Models, mesocosms, and field work to assess kelp mitigation of ocean acidification and hypoxia"*). 
+This document summarises the modelling work done in R to support the Broughton Local Seaweed Services Model (LSSM) (aka *"Models, mesocosms, and field work to assess kelp mitigation of ocean acidification and hypoxia"*). We developed a DEB-like model for kelp growth model, parameterised for *Nereocystis luetkeana*. We used the growth model to simulate an 'incubation experiment', where we estimated the effect of kelp growth on water chemistry and its potential to counter increasing ocean acidification. 
 
-Relevant aspects include the marine characterisation, the growth of kelp, and the estimation of the effect of kelp forests on the local ocean chemistry. As a fundamental aspect of this project is the iterative development of the model, we first developed a proof-of-concept model by combining example data with parameters from the literature. The proof-of-concept is intended to show that the proposed simulation is tractable within the scope envisioned for the work. We then upgraded the proof-of-concept to a more accurate and defensible working prototype by making the individual model components more realistic, and parameterising them with with *in situ* data collected as part of this project. 
+Relevant topics include seasonal kelp growth, marine characterisation, and ecosystem respiration. 
 
-# Model assumptions
+Iterative development is a fundamental aspect of this project. We completed 2 iterations through the food model, and the chemistry. Our first, proof-of-concept model combined data from the literature with local published and unpublished data. We estimated kelp growth using logistic growth, the marine environment with local and simulated data (data blending means temporal mean), and local circulation with a basic box model.   
 
-- Kelp growth and its effect on DIC will (eventually) be modelled at an hourly resolution. 
-- OA effects and mixing for the box models will be estimated using a temporal resolution defined by the tidal cycle. 
-- Uniform mixing within the boxes of the box model.
+The proof-of-concept model gives insight into the feasibility of various model components given the data anticipated from the field program. The second iteration led to a DEB-like, deterministic growth model, and a simulation of how kelp growth can alter local ocean chemistry. Simulations of kelp growth were compared to measured, inside-outside difference in pH measured in the field. The DEB is driven by PAR, daylight hours, salinity, temperature, and DIC. All data from a variety of sensors collected between April and September, 2025. 
+
+
+# Design decisions and assumptions 
+- Kelp growth and effects on DIC are modelled diurnally, based on daylight hours. 
+- This work assumes uniform mixing within all 'boxes' defined for the models. 
+
 
 # Methods
 ## Marine characterisation
+*This section needs to go*
 To understand how kelp growth my influence ocean acidification, we needed to start with a reasonable description of the marine environment. For the proof-of-concept, we used available oceanographic data for the region, and upgraded the prototype using data collected for purpose as part of this project. There has been considerable work in the region over the last few years, including as part of the Broughton Archipelago Transition Initiative (BATI) and the Marine Planning Partnership (MaPP). Some of the mooring and field sampling data from these program relevant to this work (Figure 1).
 
+KEEP THE FIGURE?
 ```{r fig:external_image, echo=FALSE, fig.cap="Study area showing field sites and historic BATI and MaPP moorings", fig.align="center", out.width="100%", fig.pos="H"}
 knitr::include_graphics("D:/Dropbox/Scitech/Broughton/Broughton_2025.png")
 ```

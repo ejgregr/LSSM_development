@@ -71,9 +71,6 @@ head( kelp_df )
 # Chat says to Increase sigma_warm until: fT ≈ 0.3–0.5 at late-season temperatures
 plot_C_losses(kelp_df, log_y=T )
 
-out_df
-
-
 plot_fT_curve( model_params$T_opt, model_params$sigma_warm )
 
 
@@ -84,7 +81,7 @@ summary(fT_reparam(env_daily$Temp))
 
 
 #---- Part 3: Calculate chemistry changes during  growing season ----
-source( "LSSM_chemistry.R" )
+source( "LSSM_chemistry2.R" )
 
 
 

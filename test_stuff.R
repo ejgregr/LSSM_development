@@ -1,4 +1,4 @@
-# Code provided by ChatGPT Feb02 2026. Digestion in progress. 
+# Code provided by ChatGPT Feb02 2026. Human digestion in progress. 
 
 
 # ----------------- Carbonate chemistry Utilities -----------------------
@@ -780,8 +780,6 @@ plot_density_exposure_dpH <- function(sims,
 
 
 
-
-
 # =============================================================================
 # 8) Example workflow (adapt object names to yours)
 # =============================================================================
@@ -817,7 +815,7 @@ sim_out <- simulate_dens_landscape(
   pairs_df = pairs,
   kelp_df = kelp_df,
   env_daily = env_daily,
-  kelp_density_gdwkg = c(0.1, 0.3, 1, 3, 5, 10, 20),
+  kelp_density_gdwkg = c(0.1, 0.3, 1, 3, 5, 10, 20, 50),
   exposure_hours_vec = c(0, 6, 9, 12, 18, 24),
   water_mass_kg = 1
 )
@@ -1102,7 +1100,7 @@ plot_interp_density_exposure_by_date <- function(sims,
         breaks = dpH_d,
         colour = "black",
         linetype = "dashed",
-        linewidth = 0.5
+        linewidth = 0.75
       )
   }
   
@@ -1111,7 +1109,7 @@ plot_interp_density_exposure_by_date <- function(sims,
 
 
 
-#--- Final plotting routine -----
+# ---- Final plotting routine -----
 
 # Interpolate the desired surface ...
 x <- make_interp_surface(sim_out$sims, site_pick = "CP", date_pick = as.Date("2025-07-22") )
@@ -1120,15 +1118,82 @@ plot_interp_density_exposure_dpH( x, y )
 
 
 
+x <- "CP"
 plot_interp_density_exposure_by_date(
   sims = sim_out$sims,
-  site_pick = "BB"
+  site_pick = x
 )
 
+summarise_contour_availability( 
+  sims = sim_out$sims,
+  site_pick = x )
 
-# Diagnostics 
 
-# Examination of growth rates used - mainly to examine frequency of +/- growth rates
+
+# ---- Diagnostics ----
+
+
+summarise_contour_availability <- function(sims,
+                                           site_pick,
+                                           nx = 200,
+                                           ny = 200,
+                                           z_col = "dpH_end") {
+  
+  dates <- sims %>%
+    dplyr::filter(Site == site_pick) %>%
+    dplyr::distinct(Date) %>%
+    dplyr::arrange(Date) %>%
+    dplyr::pull(Date)
+  
+  if (length(dates) == 0) {
+    stop("No dates available for site: ", site_pick)
+  }
+  
+  dplyr::bind_rows(lapply(dates, function(d) {
+    
+    # Interpolated surface for this date (same as plotting workflow)
+    surf <- make_interp_surface(
+      sims,
+      site_pick = site_pick,
+      date_pick = d,
+      z = z_col,
+      nx = nx,
+      ny = ny
+    )
+    
+    # Observed ΔpH for this date
+    dpH_obs <- make_obs_dpH(
+      sims,
+      site_pick = site_pick,
+      date_pick = d
+    )
+    
+    # Surface range (finite only)
+    zvals <- surf[[z_col]]
+    zmin <- min(zvals, na.rm = TRUE)
+    zmax <- max(zvals, na.rm = TRUE)
+    
+    tibble::tibble(
+      Site = site_pick,
+      Date = as.Date(d),
+      dpH_obs = dpH_obs,
+      zmin = zmin,
+      zmax = zmax,
+      has_contour = is.finite(dpH_obs) && dpH_obs >= zmin && dpH_obs <= zmax
+    )
+  }))
+}
+
+
+
+
+
+
+
+#------------------- Stale DEB questions ---------------------- 
+
+#
+Examination of growth rates used - mainly to examine frequency of +/- growth rates
 summary(sim_out$sims$net_daily_gDW)
 summary(sim_out$sims$u_day)
 summary(sim_out$sims$u_night)
