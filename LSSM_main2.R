@@ -69,12 +69,11 @@ head( kelp_df )
 # updated fT curve. But it is also reasonable, and logical give the T constraint.
 # Check into this later, with respect to field temps and moorings. 
 # Chat says to Increase sigma_warm until: fT ≈ 0.3–0.5 at late-season temperatures
-plot_C_losses(kelp_df, log_y=T )
 
 plot_fT_curve( model_params$T_opt, model_params$sigma_warm )
-
-
 plot_fL_curve()
+
+plot_C_losses(kelp_df, log_y=T )
 plot_temperature_scaling( env_daily )
 plot_DLI_scaling( env_daily )
 summary(fT_reparam(env_daily$Temp))
@@ -82,6 +81,62 @@ summary(fT_reparam(env_daily$Temp))
 
 #---- Part 3: Calculate chemistry changes during  growing season ----
 source( "LSSM_chemistry2.R" )
+
+
+
+
+
+#------------ Plot the BIG plot of tea landscape with paired samples -------
+
+# Interpolate all the surfaces from the simulation ...
+surf_all <- build_interp_grid_data(sim_out$sims, nx = 200, ny = 200, z_col = "dpH_end")
+
+# Find all available contours ... 
+# This assumes a global variable 
+contour_ok <- summarise_contour_availability_all_sites(sim_out$sims, nx = 200, ny = 200, z_col = "dpH_end")
+
+# Filter out the surfaces with no contour ... 
+# NOTE: 
+surf_all_ok <- surf_all %>%
+  dplyr::inner_join(
+    contour_ok %>%
+      dplyr::filter(has_contour) %>%
+      dplyr::select(Site, Date),   # <- keep only the keys from contour_ok
+    by = c("Site", "Date")
+  )
+
+# Create label positions for dpH values ...
+label_df <- surf_all_ok %>%
+  dplyr::group_by(Site, Date) %>%
+  dplyr::summarise(
+    dpH_obs = dpH_obs[1],
+    x_lab = min(exposure_hours, na.rm = TRUE),
+    y_lab = max(kelp_density_gdwkg, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+# Plot only those with contours ... 
+bigP <- plot_interp_grid_sites_dates(surf_all_ok, z_col = "dpH_end", log10_density = TRUE)
+
+#--- PLOT all incubations ... 
+#bigP <- plot_interp_grid_sites_dates(surf_all, z_col = "dpH_end", log10_density = TRUE)
+
+ggsave(
+  "deltapH_and_density_exposure_grid.png",
+  plot = bigP,
+  width = 14,          # keep width similar
+  height = 25,         # ~3× taller than default
+  units = "in",
+  dpi = 300
+)
+
+
+
+
+
+
+
 
 
 
