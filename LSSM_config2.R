@@ -1121,6 +1121,63 @@ simulate_dens_landscape <- function(pairs_df,
 }
 
 
+make_dpH_df <- function(sim_out) {
+  
+  sim_out$sims %>%
+    dplyr::mutate(
+      Date = as.Date(Date),
+      dpH_end    = pH_end - pH_Out,   # modeled change
+      dpH_needed = pH_In  - pH_Out,   # observed change
+      match_error = dpH_end - dpH_needed
+    ) %>%
+    dplyr::select(
+      Site,
+      Date,
+      dpH_end,
+      dpH_needed,
+      match_error
+    )
+}
+
+
+make_dpH_summary_df <- function(sim_out) {
+  
+  sim_out$sims %>%
+    dplyr::mutate(
+      Date = as.Date(Date),
+      dpH_end    = pH_end - pH_Out,   # modeled ΔpH
+      dpH_needed = pH_In  - pH_Out,   # observed ΔpH
+      match_error = dpH_end - dpH_needed
+    ) %>%
+    dplyr::group_by(Site, Date) %>%
+    dplyr::slice_min(
+      order_by = abs(match_error),
+      n = 1,
+      with_ties = FALSE
+    ) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(
+      Site,
+      Date,
+      dpH_needed,
+      dpH_end,
+      match_error,
+      exposure_hours
+    )
+}
+
+
+# Time ends of a data distribution. For removing outliers
+filter_outliers <- function(df, max_abs) {
+  df %>%
+    dplyr::filter(abs(match_error) <= max_abs)
+}
+
+
+
+x <- sim_out$sims
+head(x)
+
 
 # --------------- Visualization helpers for landscape slices -------------------
 

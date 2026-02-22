@@ -84,6 +84,49 @@ source( "LSSM_chemistry2.R" )
 
 
 
+dpH_df <- make_dpH_summary_df( sim_out )
+
+
+# Facet plot of difference from measured. 
+x <- filter_outliers( dpH_df, 0.02 )
+
+
+dim(dpH_df)
+dim(x)
+
+
+# Facet plotting ... 
+# Showing the variability in predictive success. 
+
+#df_hm <- dpH_df %>%
+df_hm <- x %>%
+  mutate(
+    Date_f = factor(Date, levels = sort(unique(Date)))
+  )
+
+
+ggplot(df_hm, aes(x = Site, y = Date_f, fill = match_error)) +
+  geom_tile(colour = "white", linewidth = 0.2) +
+  scale_fill_gradient2(
+    # Purple–Tan–Green (colorblind-friendly)
+#    low = "#762A83", mid = "#DFC27D", high = "#1B7837", midpoint = 0,
+    # Blue–Gray–Orange. Neutral gray at zero avoids visual dominance
+    low = "#4575B4", mid = "#BEBEBE", high = "#D73027", midpoint = 0,
+    name = expression("Match error\n(modeled − observed "*Delta*"pH)")
+    
+  ) +
+  labs(
+    x = "Site",
+    y = "Sampling date",
+    title = "Heat map of model–observation pH mismatch",
+    subtitle = "One value per Site × Date (best match across exposure hours)"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+
 
 
 #------------ Plot the BIG plot of tea landscape with paired samples -------
