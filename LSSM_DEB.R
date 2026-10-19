@@ -12,11 +12,14 @@
 #   carbon fixation, respiration, and DOC production.
 #   Data from Pontier et al. (2023) used to attenuate growth as a function of 
 #   temperature and light levels. 
+# 26Sep09: Restart after summer hiatus. Last modifications Jun 23. 
 #============================================================================
 
 #--- REQUIRES
-# env_daily() - a df describing growing conditions.
+# env_daily - a df describing growing conditions.
+# This is made in the main script from dli_df and par_df, which come from LSSM_Water_Analysis.Rproj
 
+#----- Main function and parameters
 #----------------------------------
 # Jan 27: EVERYTHING in DW please. 
 # Define the nereo growth ODE system. We are growing wet weight using a single frond model.
@@ -61,7 +64,7 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     GP_night_umolC_gDW <- dark_fixation * fT * night_h
     GP_umolC_gDW       <- GP_day_umolC_gDW + GP_night_umolC_gDW
     
-    # And now translate to the Carbon fixed this day (for DOC leakage, below)
+    # And now calculate the Carbon fixed this day (for DOC leakage, below)
     GP_day_umolC   <- B_fr * GP_day_umolC_gDW
     GP_night_umolC <- B_fr * GP_night_umolC_gDW
     GP_umolC       <- GP_day_umolC + GP_night_umolC
@@ -144,11 +147,9 @@ model_params <- list(
   # Based on Weigel and Pfister
   DOC_day_max = 0.24,   # low-light PER (e.g., ~0.23–0.24)
   DOC_day_min = 0.08,   # high-light PER (e.g., ~0.08)
-  DOC_DLI50   = 43,     # Calc'd from DLI distributional data
-  DOC_DLI_k   = 0.15,   # Calc'd from DLI distributional data
-  #  DOC_DLI50   = 30,     # DLI at midpoint of decline (mol m^-2 d^-1)
-  #  DOC_DLI_k   = 0.25,   # steepness (per DLI unit)
-  
+  DOC_DLI50   = 43,     # DLI at midpoint of decline. calc'd from DLI distributional data
+  DOC_DLI_k   = 0.15,   # Steepness per DLI unit, calc'd from DLI distributional data
+
   # Night DOC leakage (simple assumption): fraction of night GP
   DOC_night_frac = 0.10, # tune later; keep small under non–nutrient-limited assumption  
   
@@ -168,14 +169,16 @@ model_params <- list(
   alpha_water  = 0.06  # Fraction of DLI reflected at water surface
 )
 
-# 3. Define initial state (start with small kelp plant)
-# Starting biomass based on young sporophyte with established first blade = 1 to 4 g WW total.
+
+#----- RUNNNING the code ... 
+# 1. Define initial state (start with small kelp plant)
+# Starting biomass (DW) based on young sporophyte with established first frond = 1 to 4 g WW total.
 initial_state <- c(
   B_th = 1 * model_params$wet_to_dry,  # Stated value for stipe mass in (g WW)
   B_fr = 2 * model_params$wet_to_dry   # Stated value for frond mass in (g WW)
 )
 
-# 4. Define time sequence grow_kelp(from day 1 to day 100)
+# 2. Define time sequence grow_kelp(from day 1 to day 100)
 times <- env_daily$day
 
 # 5. Solve the ODE system using the 'ode' function
@@ -194,17 +197,4 @@ kelp_df <- cbind( kelp_df, "B_th_WW" = kelp_df$B_th/model_params$wet_to_dry,
 
 
 ### Fin.
-
-
-
-
-
-
-
-
-
-
-
-
-
 

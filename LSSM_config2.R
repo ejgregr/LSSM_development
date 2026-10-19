@@ -14,7 +14,6 @@ required.packages <- c( "ggplot2", "reshape2", "lubridate", "dplyr", "stringr",
 
 # Other packages that might be useful. 
 # "tidyr", "raster", "stringr", "rasterVis",
-# "RColorBrewer", "factoextra", "ggpubr", "cluster", 
 # "diffeR", "vegan", "ranger", "e1071", "forcats", "measures", "caret", "PresenceAbsence"
 # "randomForest", "spatialEco", "xlsx", "robustbase", "biomod2", "sp", "magrittr", "binr", 'gwxtab'
 
@@ -31,17 +30,17 @@ version$version.string
 #==== Configuration ====
 bc_time <- 'America/Vancouver'
 
-data_dir <- "C:/Data/Git/LSSM_development/Data"
+data_dir <- "C:/Data/Git/LSSM_prototype/Data"
 DEB_dir  <- "C:/Data/Git/LSSM_water_analysis/Results"
-PDF_dir  <- "C:/Data/Git/LSSM_development/PDF" # for Markdown script
+PDF_dir  <- "C:/Data/Git/LSSM_prototype/PDF" # for Markdown script
 source_dir <- "C:/Data/Git/LSSM_water_analysis/Source_data"
 
-# Load 2025 observational data. 
-input_path <- file.path(DEB_dir, "kelp_project_data.RData" )
-load(input_path)
 
+#-------------------- SUPPORT FUNCTIONS ----------------------------------
+#           Nothing should be created below here 
 
-# Bunch o code to load and prep the discrete water samples.
+# Load and prep the discrete water samples.
+# Copied from LSSM_Water_Quality.prj. discrete_sample_loading.R
 load_discrete_samples <- function(){
   # SOURCE modified during development to deal with inconsistent data:
   #   RPtoRK : 2 codes for the same site
@@ -89,8 +88,6 @@ load_discrete_samples <- function(){
   
   return( inout_data )
 }
-
-
 
 
 #--------------------------- Light Support Functions ---------------------------
@@ -416,7 +413,6 @@ plot_fT_curve <- function(T_opt = 10.0, sigma_warm = 1.4,
     ggplot2::theme_classic()
 }
 
-
 plot_fL_curve <- function(L_low = 20, L_high = 40, 
                           low_loss_per_10 = 0.23, high_loss_per_10 = 0.23,
                           DLI_min = 0, DLI_max = 70, DLI_step = 0.5
@@ -445,7 +441,6 @@ plot_fL_curve <- function(L_low = 20, L_high = 40,
 #-------------------------- DEB Support Functions ---------------------------- 
 # ChatGPT supported functions to scale T and DLI effects as per Pontier et al.
 
-
 # Warm-side Gaussian penalty with a cold-side plateau. Simple representation of
 # the warm temperature limitation identified by Pontier et al. 
 fT_reparam <- function(T_C, T_opt = 10.0, sigma_warm = 1.4) {
@@ -470,7 +465,6 @@ fT_gauss_warm_kink <- function(T_C, T_opt = 10.0, sigma_warm = 1.4,
   kink <- ifelse(T_C <= T_kink, 1.0, exp(-k_extra * (T_C - T_kink)))
   pmax(0, pmin(1, base * kink))
 }
-
 
 # --- Helper for DLI scaling: convert "p% change per unit" into exponential rate constant ---
 # If multiplier per unit is m (e.g., 0.77 per +1°C), then k = -log(m) / unit
@@ -633,7 +627,6 @@ compute_unet_day_night_from_deb <- function(row,
   
   list(u_day = u_day, u_night = u_night, frac_day = frac_day, day_h = day_h, night_h = night_h)
 }
-
 
 #---------------------- Tea box forward model  ------------------------------
 # Assumptions: - No gas exchange, Well mixed, TA constant
@@ -1172,11 +1165,6 @@ filter_outliers <- function(df, max_abs) {
   df %>%
     dplyr::filter(abs(match_error) <= max_abs)
 }
-
-
-
-x <- sim_out$sims
-head(x)
 
 
 # --------------- Visualization helpers for landscape slices -------------------

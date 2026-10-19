@@ -11,6 +11,12 @@
 #       NOTE: this fixed the DLI which now matches the values reported by Pontier.
 # Jan29: Nice stable, parameterized version of LSSM 'DEB'. Easy to run and 
 #   ready for chemistry.
+# 26Sep09: Long break for summer, after Joe's heart surgery on March 3.
+#  Goal now is to push for project report by Dec31
+#  Spring work took this as far as making kelp tea. Later updated growth model
+#  with new ODE approach. 
+#  Also, moved the assembly of env_daily DF over from LSSM_Water_Analysis. whew. 
+#  RMD documentation out of date. Latest documentation in a Google doc on shared drive.
 #################################################################################
 
 rm(list=ls(all=T)) # Erase environment.
@@ -18,7 +24,20 @@ set.seed(42)       # Setting seed for reproducibility
 
 # Load packages and functions ... 
 setwd( "c:/Data/Git/LSSM_development")
+
+# This script does alot of work. 
 source( "LSSM_config2.R" )
+
+
+#=== LOAD Observational data ===
+# LOAD 2025 observational data, including PAR/DLI estimates.
+# LAST time RData created = 2026/01/13 by the LSSM_Water_analysis.proj
+input_path <- file.path(DEB_dir, "kelp_project_data.RData" )
+#input_path <- file.path(DEB_dir, "kelp_project_data_2026_01_13.RData" )
+load(input_path)
+
+# LOAD discrete samples to support inside/outside pH comparison
+inout_data <- load_discrete_samples()
 
 # Set temporal window to match moorings ... 
 start_date <- "2023-05-04 00:00:00 PDT"
@@ -27,7 +46,6 @@ end_date   <- "2023-10-11 00:00:00 PDT"
 #---- Part 1: Load and prep environmental drivers ----
 # Loads temperature, salinity, CO2, and oxygen from moorings, 
 # as well as light (as DLI and PAR).
-source( "LSSM_config2.R" )
 
 #---- Environmental data prep --------
 DLI_env  <- data.frame( "Datestamp" = DLI_df$Date, "DLI" = DLI_df$mean )
@@ -37,7 +55,7 @@ env_daily <- make_env_daily( DLI_env, temp_env )
 head(env_daily)
 
 #Add real DOY for plotting etc.
-env_daily <- cbind(env_daily, "real_DOY" = as.integer(format(as.Date(env_daily$Datestamp), "%j")) )
+env_daily <- cbind(env_daily, "real_DOY" = as.integer(format(as.Date( env_daily$Datestamp ), "%j")) )
 
 # Daylight hours for the days in env_daily 
 day_hours <- get_daylight_hours( PAR_env )
@@ -54,7 +72,7 @@ env_daily$Temp <- env_daily$Temp - 2
 plot( env_daily$Temp )
 
 #----------------------- Load and run the ODE model  ---------------------------
-# uses dataframe env_daily
+# REQUIRES dataframe env_daily
 source( "LSSM_DEB.R" )
 # creates dataframe kelp_df
 #---------------------- Visualization and diagnostics --------------------------
@@ -63,6 +81,9 @@ plot_kelp_biomass_WW(kelp_df, log=F )
 plot( kelp_df$net_daily_gDW)
 
 head( kelp_df )
+
+# Sep09: On review, PAR from ERA5 needs to be corrected as several points 
+#  chosen during the process were land-based. This needs a rerun of the GEE work
 
 # Jan29: Reasonably well parameterized, except DOC leakage and respiration
 # fall of the cliff with higher temps (beyond 12C). This is new with the Gaussian
@@ -80,9 +101,15 @@ summary(fT_reparam(env_daily$Temp))
 
 
 #---- Part 3: Calculate chemistry changes during  growing season ----
+# This script returns sim_out df - a landscape of kelp density by exposure time
+# for a 1 kg parcel of water. 
+
+# NB: This takes a few minutes to create 'sim_out').
 source( "LSSM_chemistry2.R" )
 
 
+#---- Remainder of this code reflects the most recent (Jan 2026) work on examining the chemistry
+# 26Sep08: Runs without a hitch from top to bottom. 
 
 dpH_df <- make_dpH_summary_df( sim_out )
 
@@ -125,8 +152,6 @@ ggplot(df_hm, aes(x = Site, y = Date_f, fill = match_error)) +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
-
-
 
 
 #------------ Plot the BIG plot of tea landscape with paired samples -------
@@ -176,14 +201,6 @@ ggsave(
 
 
 
-
-
-
-
-
-
-
-
 #---- Knit and render Markdown file to PDF -----
 # First had to install the library tinytex.
 # then run >tinytex::install_tinytex()
@@ -197,5 +214,7 @@ rmarkdown::render( "LSSM_documentation.Rmd",
                    output_format = 'pdf_document',
                    output_dir = PDF_dir,
                    output_file = paste0( "LSSM_testing_", today ))
+
+
 
 # FIN.
