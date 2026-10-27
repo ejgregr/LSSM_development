@@ -5,6 +5,9 @@
 #          Includes packages, paths, and functions.
 # Notes:
 #  - Feb 16: Added Chemistry functions. Lots of funky plotting. 
+# Updates:
+# 26Oct18: 
+# - Removed all data loading functions (these are now in LSSM_Water_Analysis.proj)
 #
 #================================== Load require packages =================================
 # check for any required packages that aren't installed and install them
@@ -31,9 +34,8 @@ version$version.string
 bc_time <- 'America/Vancouver'
 
 data_dir <- "C:/Data/Git/LSSM_prototype/Data"
-DEB_dir  <- "C:/Data/Git/LSSM_water_analysis/Results"
 PDF_dir  <- "C:/Data/Git/LSSM_prototype/PDF" # for Markdown script
-source_dir <- "C:/Data/Git/LSSM_water_analysis/Source_data"
+source_dir <- "C:/Data/Git/LSSM_water_analysis/Results"
 
 
 #-------------------- SUPPORT FUNCTIONS ----------------------------------
@@ -310,133 +312,80 @@ plot_C_losses <- function(df, time_col = "real_DOY", log_y = FALSE) {
   return(p)
 }
 
-# Takes temp from env_daily df, calculates and plots associated scaling factor
-plot_temperature_scaling <- function( env_dat ){
+# Daily temperature and fT over the season, using the model's parameters.
+plot_temperature_scaling <- function(env_dat,
+                                     T_opt = model_params$T_opt,
+                                     sigma_warm = model_params$sigma_warm) {
+  DOY      <- env_dat$real_DOY
+  T_daily  <- env_dat$Temp
+  fT_daily <- fT_reparam(T_daily, T_opt = T_opt, sigma_warm = sigma_warm)
   
-  # Plotting bits 
-  DOY     <- env_dat$real_DOY
-  T_daily <- env_dat$Temp
-  fT_daily <- fT_reparam( T_daily )
-  
-  # Set up plot margins to allow second y-axis
-  par(mar = c(5, 4, 4, 4) + 0.1)
-  
-  # --- Left axis: Temperature ---
-  plot( 
-    DOY, T_daily,
-    type = "l", col = "steelblue", lwd = 2,
-    xlab = "Day of Year", ylab = "Temperature (°C)", bty = "l" )
-  
-  # --- Right axis: fT ---
+  op <- par(mar = c(5, 4, 4, 4) + 0.1); on.exit(par(op))
+  plot(DOY, T_daily, type = "l", col = "steelblue", lwd = 2,
+       xlab = "Day of Year", ylab = "Temperature (°C)", bty = "l")
   par(new = TRUE)
-  
-  plot(
-    DOY, fT_daily,
-    type = "l", col = "firebrick", lwd = 2,
-    axes = FALSE, xlab = "", ylab = "", ylim = c(0, 1) )
-  
-  axis(
-    side=4, at=seq(0, 1, by=0.2), col = "firebrick", col.axis = "firebrick" )
-  
-  mtext(
-    "Temperature scaling factor (fT)",
-    side = 4,
-    line = 3,
-    col = "firebrick"
-  )
-} 
+  plot(DOY, fT_daily, type = "l", col = "firebrick", lwd = 2,
+       axes = FALSE, xlab = "", ylab = "", ylim = c(0, 1))
+  axis(4, at = seq(0, 1, by = 0.2), col = "firebrick", col.axis = "firebrick")
+  mtext("Temperature scaling factor (fT)", side = 4, line = 3, col = "firebrick")
+}
 
-# Takes DLI from env_daily df, calculates and plots associated scaling factor
-plot_DLI_scaling <- function( env_dat ){
+# Daily DLI and fL over the season. Applies the same surface-reflectance 
+# adjustment the model applies before calling fL_reparam().
+plot_DLI_scaling <- function(env_dat, alpha_water = model_params$alpha_water) {
+  DOY      <- env_dat$real_DOY
+  DLI      <- (1 - alpha_water) * env_dat$DLI
+  fL_daily <- fL_reparam(DLI)
   
-  # Days to plot
-  DOY <- env_dat$real_DOY
-  DLI       <- env_dat$DLI
-  fL_daily  <- fL_reparam( DLI )
-  
-  # Set up plot margins to allow second y-axis
-  par(mar = c(5, 4, 4, 4) + 0.1)
-  
-  # --- Left axis: DLI ---
-  plot( 
-    DOY, DLI,
-    type = "l", col = "steelblue", lwd = 2,
-    xlab = "Day of Year", ylab = "Daily Light Interval (mol m⁻² d⁻¹)", bty = "l" )
-  
-  # --- Right axis: fL ---
+  op <- par(mar = c(5, 4, 4, 4) + 0.1); on.exit(par(op))
+  plot(DOY, DLI, type = "l", col = "steelblue", lwd = 2,
+       xlab = "Day of Year", ylab = "DLI after reflectance (mol m⁻² d⁻¹)", bty = "l")
   par(new = TRUE)
-  
-  plot(
-    DOY, fL_daily,
-    type = "l", col = "firebrick", lwd = 2,
-    axes = FALSE, xlab = "", ylab = "", ylim = c(0, 1) )
-  
-  axis(
-    side=4, at=seq(0, 1, by=0.2), col = "firebrick", col.axis = "firebrick" )
-  
-  mtext(
-    "DLI scaling factor (fL)",
-    side = 4,
-    line = 3,
-    col = "firebrick"
-  )
-} 
-
+  plot(DOY, fL_daily, type = "l", col = "firebrick", lwd = 2,
+       axes = FALSE, xlab = "", ylab = "", ylim = c(0, 1))
+  axis(4, at = seq(0, 1, by = 0.2), col = "firebrick", col.axis = "firebrick")
+  mtext("DLI scaling factor (fL)", side = 4, line = 3, col = "firebrick")
+}
 
 # Parameterless functions to plot the environmental curves.
-plot_fT_curve <- function(T_opt = 10.0, sigma_warm = 1.4,
-                          Tmin = 0, T_min = 7, T_max = 20, by = 0.1) {
-  
-  # Warm-side Gaussian penalty with cold-side plateau (Pontier-style)
-  fT_gauss_warm <- function(T_C, T_opt = 10.0, sigma_warm = 1.4, Tmin = 0) {
-    out <- ifelse(
-      T_C <= T_opt,
-      1.0,
-      exp(- (T_C - T_opt)^2 / (2 * sigma_warm^2))
-    )
-    pmax(Tmin, pmin(1, out))
-  }
+plot_fT_curve <- function(T_opt = model_params$T_opt,
+                          sigma_warm = model_params$sigma_warm,
+                          T_min = 5, T_max = 20, by = 0.1) {
   
   T_seq <- seq(T_min, T_max, by = by)
-  df <- data.frame(
-    T_C = T_seq,
-    fT  = fT_gauss_warm(T_seq, T_opt = T_opt, sigma_warm = sigma_warm, Tmin = Tmin)
-  )
+  df <- data.frame(T_C = T_seq,
+                   fT  = fT_reparam(T_seq, T_opt = T_opt, sigma_warm = sigma_warm))
   
   ggplot2::ggplot(df, ggplot2::aes(x = T_C, y = fT)) +
     ggplot2::geom_line(linewidth = 1) +
+    ggplot2::geom_vline(xintercept = T_opt, linetype = "dashed") +
     ggplot2::scale_y_continuous(limits = c(0, 1)) +
-    ggplot2::labs(
-      x = expression("Temperature ("*degree*C*")"),
-      y = expression(f[T])
-    ) +
+    ggplot2::labs(x = expression("Temperature ("*degree*C*")"),
+                  y = expression(f[T])) +
     ggplot2::theme_classic()
 }
 
-plot_fL_curve <- function(L_low = 20, L_high = 40, 
-                          low_loss_per_10 = 0.23, high_loss_per_10 = 0.23,
-                          DLI_min = 0, DLI_max = 70, DLI_step = 0.5
-) {
-  df <- data.frame(DLI = seq(DLI_min, DLI_max, by = DLI_step))
-  df$fL <- fL_reparam(
-    DLI = df$DLI,
-    L_low = L_low,
-    L_high = L_high,
-    low_gain_per_10 = low_loss_per_10,
-    high_loss_per_10 = high_loss_per_10
-  )
+# Light scaling curve. Defaults come from fL_reparam()'s own formals, so the 
+# plot shows exactly what the model uses.
+plot_fL_curve <- function(L_low  = formals(fL_reparam)$L_low,
+                          L_high = formals(fL_reparam)$L_high,
+                          low_gain_per_10  = formals(fL_reparam)$low_gain_per_10,
+                          high_loss_per_10 = formals(fL_reparam)$high_loss_per_10,
+                          DLI_min = 0, DLI_max = 70, DLI_step = 0.5) {
   
-  ggplot(df, aes(x = DLI, y = fL)) +
-    geom_line(linewidth = 1) +
-    geom_vline(xintercept = c(L_low, L_high), linetype = "dashed") +
-    labs(
-      x = expression("Daily Light Integral (mol m"^-2*" d"^-1*")"),
-      y = "Light scaling factor (fL)"
-    ) +
-    coord_cartesian(ylim = c(0, 1)) +
-    theme_classic()
+  df <- data.frame(DLI = seq(DLI_min, DLI_max, by = DLI_step))
+  df$fL <- fL_reparam(df$DLI, L_low = L_low, L_high = L_high,
+                      low_gain_per_10 = low_gain_per_10,
+                      high_loss_per_10 = high_loss_per_10)
+  
+  ggplot2::ggplot(df, ggplot2::aes(x = DLI, y = fL)) +
+    ggplot2::geom_line(linewidth = 1) +
+    ggplot2::geom_vline(xintercept = c(L_low, L_high), linetype = "dashed") +
+    ggplot2::labs(x = expression("Daily Light Integral (mol m"^-2*" d"^-1*")"),
+                  y = expression(f[L])) +
+    ggplot2::coord_cartesian(ylim = c(0, 1)) +
+    ggplot2::theme_classic()
 }
-
 
 #-------------------------- DEB Support Functions ---------------------------- 
 # ChatGPT supported functions to scale T and DLI effects as per Pontier et al.
@@ -451,32 +400,11 @@ fT_reparam <- function(T_C, T_opt = 10.0, sigma_warm = 1.4) {
   )
 }
 
-# JUST IN CASE want to add this extra penalty. There are some high temperatures. 
-fT_gauss_warm_kink <- function(T_C, T_opt = 10.0, sigma_warm = 1.4,
-                               T_kink = 12.0, extra_loss_per_C = 0.35) {
-  base <- ifelse(
-    T_C <= T_opt,
-    1.0,
-    exp(- (T_C - T_opt)^2 / (2 * sigma_warm^2))
-  )
-  # additional exponential penalty only above T_kink
-  m_extra <- 1 - extra_loss_per_C
-  k_extra <- -log(m_extra)
-  kink <- ifelse(T_C <= T_kink, 1.0, exp(-k_extra * (T_C - T_kink)))
-  pmax(0, pmin(1, base * kink))
-}
-
-# --- Helper for DLI scaling: convert "p% change per unit" into exponential rate constant ---
-# If multiplier per unit is m (e.g., 0.77 per +1°C), then k = -log(m) / unit
-k_from_multiplier <- function(multiplier, unit = 1) {
-  -log(multiplier) / unit
-}
-
 # --- DLI scaling for blades: hump-shaped with low- and high-light penalties ---
 # Approx ~23% gain per +10 DLI near ~20 (low-light side) and ~23% loss per +10 above ~40 (high-light side)
-fL_reparam <- function(DLI, L_low = 20, L_high = 60, # was 40
+fL_reparam <- function(DLI, L_low = 20, L_high = 40, 
                        low_gain_per_10 = 0.23,   # interpreted as "being 10 below optimal costs ~23%"
-                       high_loss_per_10 = 0.10) {  # was 23
+                       high_loss_per_10 = 0.23) {
   
   # Convert to multipliers:
   # low side: at (L_low - 10) -> multiplier ~ (1 - 0.23) = 0.77
@@ -499,6 +427,12 @@ fL_reparam <- function(DLI, L_low = 20, L_high = 60, # was 40
   
   # Keep bounded [0,1]
   pmax(0, pmin(1, out))
+}
+
+# --- Helper for DLI scaling: convert "p% change per unit" into exponential rate constant ---
+# If multiplier per unit is m (e.g., 0.77 per +1°C), then k = -log(m) / unit
+k_from_multiplier <- function(multiplier, unit = 1) {
+  -log(multiplier) / unit
 }
 
 
@@ -593,7 +527,7 @@ make_pairs_out_in <- function(water_with_dic) {
 
 # Partitions the DEB-provided net daily carbon uptake per gram dry weight (net_daily_gDW) 
 # into day and night hourly uptake rates, using the ratio of gross primary production 
-#during day and night and externally supplied day/night hours.
+# during day and night and externally supplied day/night hours.
 compute_unet_day_night_from_deb <- function(row,
                                             net_col   = "net_daily_gDW",
                                             gp_day_col   = "GP_day_umolC",
@@ -1216,7 +1150,6 @@ plot_landscape_match_error <- function(sim_df, site_pick, date_pick, exposure_pi
     theme_classic()
 }
 
-
 # Shows the modelled change in pH due to kelp carbon uptake over the specified 
 # exposure time, as a function of water mass and kelp biomass. AND does this for
 # every site, creating a facet plot
@@ -1304,7 +1237,6 @@ make_interp_surface <- function(sims, site_pick, date_pick, z = "dpH_end",
   tibble::as_tibble(surf)
 }
 
-
 # Pull the delta pH observation for selected site and date (ΔpH = In − Out)
 make_obs_dpH <- function(sims, site_pick, date_pick) {
   
@@ -1319,8 +1251,7 @@ make_obs_dpH <- function(sims, site_pick, date_pick) {
   x[1]
 }
 
-
-# 3) Plot interpolated surface + observed ΔpH contour
+# Plot interpolated surface + observed ΔpH contour
 plot_interp_density_exposure_dpH <- function(surf,
                                              dpH_obs,
                                              site_pick = NULL,
@@ -1409,7 +1340,6 @@ plot_interp_density_exposure_dpH <- function(surf,
   
   p
 }
-
 
 # This loops over all available dates for a given site, builds the interpolated
 # surface for each date, and attaches the observed ΔpH. It then combines everything 
@@ -1510,7 +1440,6 @@ plot_interp_density_exposure_by_date <- function(sims,
   p
 }
 
-
 # Diagnostic plot produces table of available contours from descrete samples ----
 summarise_contour_availability <- function(sims,
                                            site_pick,
@@ -1562,7 +1491,6 @@ summarise_contour_availability <- function(sims,
     )
   }))
 }
-
 
 
 #--------------------------- Density-based plot -------------------------------
@@ -1635,7 +1563,6 @@ plot_density_exposure_dpH <- function(sims,
   
   p
 }
-
 
 
 #------------ Set of functions to plot simulations with in-out data ----------------

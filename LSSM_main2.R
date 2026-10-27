@@ -5,18 +5,20 @@
 # Main revision of the earlier LSSM, focused on using 2025 data. 
 #
 ## Updates: 
-# Newly available data include
-#   1. currents (speed and direction) for two tidal model sites
-#   2. DLI from satellite to better reflect growing conditions
-#       NOTE: this fixed the DLI which now matches the values reported by Pontier.
-# Jan29: Nice stable, parameterized version of LSSM 'DEB'. Easy to run and 
-#   ready for chemistry.
+# 26Oct19: Back to Growth Model after cleaning up data loading. 
 # 26Sep09: Long break for summer, after Joe's heart surgery on March 3.
 #  Goal now is to push for project report by Dec31
 #  Spring work took this as far as making kelp tea. Later updated growth model
 #  with new ODE approach. 
 #  Also, moved the assembly of env_daily DF over from LSSM_Water_Analysis. whew. 
 #  RMD documentation out of date. Latest documentation in a Google doc on shared drive.
+# Newly available data include
+#   1. currents (speed and direction) for two tidal model sites
+#   2. DLI from satellite to better reflect growing conditions
+#       NOTE: this fixed the DLI which now matches the values reported by Pontier.
+# 26Jan29: Nice stable, parameterized version of LSSM 'DEB'. Easy to run and 
+#   ready for chemistry.
+
 #################################################################################
 
 rm(list=ls(all=T)) # Erase environment.
@@ -32,44 +34,46 @@ source( "LSSM_config2.R" )
 #=== LOAD Observational data ===
 # LOAD 2025 observational data, including PAR/DLI estimates.
 # LAST time RData created = 2026/01/13 by the LSSM_Water_analysis.proj
-input_path <- file.path(DEB_dir, "kelp_project_data.RData" )
+input_path <- file.path(source_dir, "kelp_project_data_2026_10_19.RData" )
 #input_path <- file.path(DEB_dir, "kelp_project_data_2026_01_13.RData" )
 load(input_path)
 
-# LOAD discrete samples to support inside/outside pH comparison
-inout_data <- load_discrete_samples()
+# Oct 18: Change to PREP discrete for inside/outside pH comparison if needed
+# inout_data <- load_discrete_samples()
 
 # Set temporal window to match moorings ... 
-start_date <- "2023-05-04 00:00:00 PDT"
-end_date   <- "2023-10-11 00:00:00 PDT"
+start_date <- "2023-04-25 00:00:00 PDT"
+end_date   <- "2023-09-15 00:00:00 PDT"
 
-#---- Part 1: Load and prep environmental drivers ----
-# Loads temperature, salinity, CO2, and oxygen from moorings, 
-# as well as light (as DLI and PAR).
+#---- Part 1: Assemble environmental drivers for DEB ----
+# Assembles temperature, salinity, CO2, DLI, and oxygen from moorings, 
+# Oct 18: Do we need PAR?
 
 #---- Environmental data prep --------
-DLI_env  <- data.frame( "Datestamp" = DLI_df$Date, "DLI" = DLI_df$mean )
-temp_env <- data.frame( "Datestamp" = date( DST_focal1$DateTime ), "Temp" = DST_focal1$Temp )
-PAR_env  <- data.frame( "Datestamp" = par_df$Timestamp, "PAR" = par_df$mean, "SD" = par_df$stdDev )
+DLI_env  <- data.frame( "Datestamp" = DLI_df$DateTime, "DLI" = DLI_df$DLI_mean )
+temp_env <- data.frame( "Datestamp" = date( DST_foc1$DateTime ), "Temp" = DST_foc1$Temp )
+PAR_env  <- data.frame( "Datestamp" = PAR_df$DateTime, "PAR" = PAR_df$PAR_mol_hr )
 env_daily <- make_env_daily( DLI_env, temp_env )
 head(env_daily)
 
 #Add real DOY for plotting etc.
 env_daily <- cbind(env_daily, "real_DOY" = as.integer(format(as.Date( env_daily$Datestamp ), "%j")) )
+plot(env_daily$DLI)
 
 # Daylight hours for the days in env_daily 
 day_hours <- get_daylight_hours( PAR_env )
-#plot(env_daily$DLI)
 
 # Join daylight hours to available daily environmental data 
 env_daily <- env_daily %>%
   left_join(day_hours, by = "Datestamp")
 
-head(env_daily)
+tail(env_daily)
 
-# Test temp effect on growth
-env_daily$Temp <- env_daily$Temp - 2
+# Adjust temp based on observed bias between samples and sensor ... 
+env_daily$Temp <- env_daily$Temp
 plot( env_daily$Temp )
+
+
 
 #----------------------- Load and run the ODE model  ---------------------------
 # REQUIRES dataframe env_daily
@@ -78,12 +82,9 @@ source( "LSSM_DEB.R" )
 #---------------------- Visualization and diagnostics --------------------------
 names( kelp_df )
 plot_kelp_biomass_WW(kelp_df, log=F ) 
-plot( kelp_df$net_daily_gDW)
+plot( kelp_df$net_daily_gDW ~ kelp_df$real_DOY)
 
 head( kelp_df )
-
-# Sep09: On review, PAR from ERA5 needs to be corrected as several points 
-#  chosen during the process were land-based. This needs a rerun of the GEE work
 
 # Jan29: Reasonably well parameterized, except DOC leakage and respiration
 # fall of the cliff with higher temps (beyond 12C). This is new with the Gaussian
@@ -91,13 +92,26 @@ head( kelp_df )
 # Check into this later, with respect to field temps and moorings. 
 # Chat says to Increase sigma_warm until: fT ≈ 0.3–0.5 at late-season temperatures
 
-plot_fT_curve( model_params$T_opt, model_params$sigma_warm )
+plot_fT_curve()
 plot_fL_curve()
 
 plot_C_losses(kelp_df, log_y=T )
 plot_temperature_scaling( env_daily )
 plot_DLI_scaling( env_daily )
 summary(fT_reparam(env_daily$Temp))
+
+sum(kelp_df$B_fr[144]) + sum(kelp_df$B_th[144])
+
+
+kelp_df$B_fr / kelp_df$B_th
+
+
+
+35/24
+
+summary(kelp_df$fR)
+
+
 
 
 #---- Part 3: Calculate chemistry changes during  growing season ----

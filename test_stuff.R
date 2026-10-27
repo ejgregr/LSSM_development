@@ -4,6 +4,23 @@ library(ggplot2)
 library(metR)  # for text on contours
 
 
+simdat <- c(8.5, 6.0, 4.5, 10.9, 2.8, 4.0, 0.17, 5.5, 3.71, 4.0, 3.0, 5.7, 4, 2.7, 4.8, 7.5, 11.0,	6.6, 4.7, 7.4, 4.5 )
+
+add_noise <- function(x, scale = 0.1) {
+  noise <- rnorm(length(x))
+  noise <- noise - mean(noise)           # zero mean
+  noise <- noise / sd(noise)             # unit SD
+  noise <- noise * sd(x) * scale         # scale to fraction of original SD
+  x + noise
+}
+
+x_new <- add_noise(simdat, scale = 0.1)  
+hist( x_new )
+mean( x_new )
+
+
+sum( kelp_df$R_prod_umolC ) / 10e6 * 12
+
 
 
 #------------------------------------------------

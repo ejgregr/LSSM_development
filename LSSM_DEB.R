@@ -22,7 +22,7 @@
 #----- Main function and parameters
 #----------------------------------
 # Jan 27: EVERYTHING in DW please. 
-# Define the nereo growth ODE system. We are growing wet weight using a single frond model.
+# Define the nereo growth ODE system. We are growing dry weight using a single frond model.
 # Includes measured growth parameters (Weigel and Pfister 2021) 
 # and adjusted growth rates for temp and DLI responses (Pontier et al. 2024)
 grow_kelp_model <- function(t, state, pars, env_data) {
@@ -49,7 +49,6 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     fL <- fL_reparam(DLI)
     
     # --- STIPE growth using an allometric (per Starko and Martone 2016)
-
     # target stipe biomass 
     B_th_target <- a_th_fr * (B_fr^b_th_fr)
     # Avoid division by zero at very small fronds
@@ -58,7 +57,7 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     dB_th <- k_th * fT * max(0, B_th_target - B_th)
     
     # --- Mass-specific FROND fixation rates 
-    # (g DW per hour) -> per g DW per day ---
+    # (g DW per hour) -> g DW per day
     
     GP_day_umolC_gDW   <- max_fixation  * fT * fL * day_h
     GP_night_umolC_gDW <- dark_fixation * fT * night_h
@@ -81,10 +80,12 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     DOC_night_umolC <- DOC_night_frac * GP_night_umolC
     DOC_umolC       <- DOC_day_umolC + DOC_night_umolC
     
-    #--- Calculate respiration proportion
+    # Maintenance respiration: Q10 temperature dependence, independent of fT
+    # (fT is a growth/fixation limiter, so it should not scale respiration)
+    fR <- Q10_resp ^ ((T_C - T_ref_resp) / 10)
+    R_maint_umolC <- R_maint_umolC_gDW_h * fR * 24 * (B_fr + B_th)
     R_prod_umolC  <- respired_prod * GP_day_umolC # proportion of daily C fixing
-    R_maint_umolC <- R_maint_umolC_gDW_h * fT * 24 * (B_fr + B_th) # Maintenance respiration
-    
+
     # Net µmol fixed for this simulated day
     NetC_umolC <- GP_umolC - DOC_umolC - R_prod_umolC - R_maint_umolC  
     
@@ -106,7 +107,6 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     Slough_gDW <- slough_today * B_fr
     Slough_umolC <- Slough_gDW * gDW_to_gC / 12.011 * 1e6
     
-    
     # --- Net Growth (Biomass Change) ---
     dB_fr <- tissue_growth - (slough_today * B_fr)
     
@@ -116,6 +116,7 @@ grow_kelp_model <- function(t, state, pars, env_data) {
       real_DOY = real_DOY,
       fL = fL, 
       fT = fT,
+      fR = fR,
       DLI = DLI,
       net_daily_gDW   = as.numeric(dB_fr),        # net g DW added to the plant this day
       GP_day_umolC    = as.numeric(GP_day_umolC),     # Carbon fixed during day
@@ -136,12 +137,15 @@ model_params <- list(
   # Frond dynamics
   max_fixation   = 120.78, # Max observed umol C/gDW/h in June - Weigel and Pfister
   dark_fixation  = 3.75,   # Light indepdt nighttime fixation (C/gDW/h) - Weigel and Pfister
-  respired_prod  = 0.15,   # 
-  R_maint_umolC_gDW_h = 0.05, # set/fit later
-  slough_min     = 0.001,   # Min slough rate for blades (early)
-  slough_max     = 0.01,   # Max slough rate for blades (late)
-  senescence_day = 240,    # The day (approx late August) when loss ramps up
-  senescence_k   = 0.025,   # Rate of senescence increase. .05 ~ a 60 day ramp up
+  respired_prod  = 0.10,   # Fixed growth-related respiration. 
+  R_maint_umolC_gDW_h = 9, # umol C/gDW/h at T_ref_resp; Fales et al. 2023 dark resp,
+                           # 0.2-0.4 mg O2/g/h = 6-12 (RQ = 1)
+  T_ref_resp     = 13,    # reference temperature (C); mid-range of Fales 13-16C data
+  Q10_resp       = 2,   # PLACEHOLDER, not fitted. (1 = no temperature dependence)
+  slough_min     = 0.001, # Min slough rate for blades (early)
+  slough_max     = 0.01,  # Max slough rate for blades (late)
+  senescence_day = 240,   # The day (approx late August) when loss ramps up
+  senescence_k   = 0.025, # Rate of senescence increase, with a 60 day ramp up
 
     # DOC leakage as fraction of GP during DAY: decreases with light (DLI)
   # Based on Weigel and Pfister
@@ -161,10 +165,10 @@ model_params <- list(
   # Stipe dynamics
   a_th_fr = 0.5,   # coefficient a. 
   b_th_fr = 1.0,   # exponent b. 
-  k_th    = 0.3,   # enough to prevent chronic stipe lag, but not instantaneous
+  k_th    = 0.3,   # Growth balancing - enough to prevent stipe lag, but not instantaneous
   
   # Constants
-  gDW_to_gC    = 0.313, # Estimated. RSSM says 0.313. 
+  gDW_to_gC    = 0.313, # From RSSM.
   wet_to_dry   = 0.13,  # From RSSM.
   alpha_water  = 0.06  # Fraction of DLI reflected at water surface
 )

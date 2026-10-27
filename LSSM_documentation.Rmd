@@ -173,7 +173,7 @@ x = a^2 + b^2
 \newpage
 \begin{landscape}
 
-Potentially useful for re-use if a large table is needed. Originally created to suppor the POC box model.
+Potentially useful for re-use if a large table is needed. Originally created to support the POC box model.
 ```{r datasource-table, echo=FALSE, results='asis'}
 # do we need this here if declared earlier? Don't think so. 
 
