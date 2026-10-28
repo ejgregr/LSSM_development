@@ -12,12 +12,25 @@
 #   carbon fixation, respiration, and DOC production.
 #   Data from Pontier et al. (2023) used to attenuate growth as a function of 
 #   temperature and light levels. 
-# 26Sep09: Restart after summer hiatus. Last modifications Jun 23. 
+# 26Oct27: Restart after summer hiatus. Last modifications Jun 23. 
+#   Working on re-parameterizing. Updated stipe-frond relationship, and ... 
 #============================================================================
 
 #--- REQUIRES
 # env_daily - a df describing growing conditions.
 # This is made in the main script from dli_df and par_df, which come from LSSM_Water_Analysis.Rproj
+
+#----- Helper functions
+
+
+stipe_target <- function(B_fr, pars) {
+  pmax(1e-9, pmin(pars$th_max_ratio * B_fr,
+                  pars$th_slope * B_fr + pars$th_int))
+}
+
+
+fN_calc <- function(N, Ks, N_ref) pmin(1, (N / (Ks + N)) / (N_ref / (Ks + N_ref)))
+
 
 #----- Main function and parameters
 #----------------------------------
@@ -48,19 +61,22 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     fT <- fT_reparam(T_C, T_opt, sigma_warm)
     fL <- fL_reparam(DLI)
     
-    # --- STIPE growth using an allometric (per Starko and Martone 2016)
+    # --- Nutrient limitation, anchored to Pontier et al. data 
+    N_uM <- approx(N_anchor_doy, N_anchor_uM, xout = real_DOY, rule = 2)$y
+    fN   <- fN_calc(N_uM, Ks_N, N_ref)
+    
+    # --- STIPE growth using Nereo biomass relationships from Stekoll et al. (2006)
     # target stipe biomass 
-    B_th_target <- a_th_fr * (B_fr^b_th_fr)
-    # Avoid division by zero at very small fronds
-    B_th_target <- max(B_th_target, 1e-9)
+    B_th_target <- stipe_target(B_fr, pars)
+    
     # Apply allometric relaxation to target 
     dB_th <- k_th * fT * max(0, B_th_target - B_th)
     
     # --- Mass-specific FROND fixation rates 
     # (g DW per hour) -> g DW per day
     
-    GP_day_umolC_gDW   <- max_fixation  * fT * fL * day_h
-    GP_night_umolC_gDW <- dark_fixation * fT * night_h
+    GP_day_umolC_gDW   <- max_fixation  * fT * fL * fN * day_h
+    GP_night_umolC_gDW <- dark_fixation * fT * fN * night_h
     GP_umolC_gDW       <- GP_day_umolC_gDW + GP_night_umolC_gDW
     
     # And now calculate the Carbon fixed this day (for DOC leakage, below)
@@ -86,6 +102,9 @@ grow_kelp_model <- function(t, state, pars, env_data) {
     R_maint_umolC <- R_maint_umolC_gDW_h * fR * 24 * (B_fr + B_th)
     R_prod_umolC  <- respired_prod * GP_day_umolC # proportion of daily C fixing
 
+    
+
+    
     # Net µmol fixed for this simulated day
     NetC_umolC <- GP_umolC - DOC_umolC - R_prod_umolC - R_maint_umolC  
     
@@ -118,6 +137,7 @@ grow_kelp_model <- function(t, state, pars, env_data) {
       fT = fT,
       fR = fR,
       DLI = DLI,
+      fN = fN, N_uM = N_uM, 
       net_daily_gDW   = as.numeric(dB_fr),        # net g DW added to the plant this day
       GP_day_umolC    = as.numeric(GP_day_umolC),     # Carbon fixed during day
       GP_night_umolC  = as.numeric(GP_night_umolC),   # Carbon fixed during night
@@ -138,7 +158,7 @@ model_params <- list(
   max_fixation   = 120.78, # Max observed umol C/gDW/h in June - Weigel and Pfister
   dark_fixation  = 3.75,   # Light indepdt nighttime fixation (C/gDW/h) - Weigel and Pfister
   respired_prod  = 0.10,   # Fixed growth-related respiration. 
-  R_maint_umolC_gDW_h = 9, # umol C/gDW/h at T_ref_resp; Fales et al. 2023 dark resp,
+  R_maint_umolC_gDW_h = 1, #9, # umol C/gDW/h at T_ref_resp; Fales et al. 2023 dark resp,
                            # 0.2-0.4 mg O2/g/h = 6-12 (RQ = 1)
   T_ref_resp     = 13,    # reference temperature (C); mid-range of Fales 13-16C data
   Q10_resp       = 2,   # PLACEHOLDER, not fitted. (1 = no temperature dependence)
@@ -147,7 +167,15 @@ model_params <- list(
   senescence_day = 240,   # The day (approx late August) when loss ramps up
   senescence_k   = 0.025, # Rate of senescence increase, with a 60 day ramp up
 
-    # DOC leakage as fraction of GP during DAY: decreases with light (DLI)
+  # Nutrient limitation (Michaelis-Menten, normalised to W&P ambient N)
+  Ks_N  = 1,     # µM; tuneable (test 0.5, 2). Pontier: steep response 0.1-1 µM
+  N_ref = 6.8,   # µM; ambient N where W&P fixation was measured
+  # Seasonal NO3 proxy (µM) by real_DOY - PLACEHOLDER anchors, see note below
+  N_anchor_doy = c(115, 150, 180, 210, 240, 270, 300),
+  N_anchor_uM  = c(  8,   4,   1, 0.5, 1.5,   4,   6),
+  
+  
+  # DOC leakage as fraction of GP during DAY: decreases with light (DLI)
   # Based on Weigel and Pfister
   DOC_day_max = 0.24,   # low-light PER (e.g., ~0.23–0.24)
   DOC_day_min = 0.08,   # high-light PER (e.g., ~0.08)
@@ -163,9 +191,8 @@ model_params <- list(
   sigma_warm = 1.5,
   
   # Stipe dynamics
-  a_th_fr = 0.5,   # coefficient a. 
-  b_th_fr = 1.0,   # exponent b. 
-  k_th    = 0.3,   # Growth balancing - enough to prevent stipe lag, but not instantaneous
+  th_slope = 0.3212,
+  k_th     = 0.3,   # Growth balancing - enough to prevent stipe lag, but not instantaneous
   
   # Constants
   gDW_to_gC    = 0.313, # From RSSM.
@@ -173,14 +200,19 @@ model_params <- list(
   alpha_water  = 0.06  # Fraction of DLI reflected at water surface
 )
 
+model_params$th_int       <- 0.1052 * 1000 * model_params$wet_to_dry  # 13.68 g DW
+model_params$th_B_cross   <- 50 * model_params$wet_to_dry             # 6.5 g DW
+model_params$th_max_ratio <- model_params$th_slope + model_params$th_int / model_params$th_B_cross  # 2.43
+
 
 #----- RUNNNING the code ... 
 # 1. Define initial state (start with small kelp plant)
 # Starting biomass (DW) based on young sporophyte with established first frond = 1 to 4 g WW total.
+B_fr0 <- 8 * model_params$wet_to_dry      # the sensitivity variable
+
 initial_state <- c(
-  B_th = 1 * model_params$wet_to_dry,  # Stated value for stipe mass in (g WW)
-  B_fr = 2 * model_params$wet_to_dry   # Stated value for frond mass in (g WW)
-)
+  B_th = stipe_target(B_fr0, model_params), 
+  B_fr = B_fr0)
 
 # 2. Define time sequence grow_kelp(from day 1 to day 100)
 times <- env_daily$day

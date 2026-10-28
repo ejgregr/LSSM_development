@@ -20,7 +20,6 @@
 #   ready for chemistry.
 
 #################################################################################
-
 rm(list=ls(all=T)) # Erase environment.
 set.seed(42)       # Setting seed for reproducibility
 
@@ -29,7 +28,6 @@ setwd( "c:/Data/Git/LSSM_development")
 
 # This script does alot of work. 
 source( "LSSM_config2.R" )
-
 
 #=== LOAD Observational data ===
 # LOAD 2025 observational data, including PAR/DLI estimates.
@@ -69,47 +67,87 @@ env_daily <- env_daily %>%
 
 tail(env_daily)
 
-# Adjust temp based on observed bias between samples and sensor ... 
-env_daily$Temp <- env_daily$Temp
-plot( env_daily$Temp )
-
-
-
 #----------------------- Load and run the ODE model  ---------------------------
 # REQUIRES dataframe env_daily
-source( "LSSM_DEB.R" )
+stopifnot(all(c("Temp","DLI","day_hours","night_hours","real_DOY","day") %in% names(env_daily)))
+source( "LSSM_DEB2.R" )
 # creates dataframe kelp_df
 #---------------------- Visualization and diagnostics --------------------------
-names( kelp_df )
 plot_kelp_biomass_WW(kelp_df, log=F ) 
+tail( kelp_df )
+
+plot_kelp_biomass_WW(kelp_df, time_col = "real_DOY", months = F, log=F ) 
+
 plot( kelp_df$net_daily_gDW ~ kelp_df$real_DOY)
 
-head( kelp_df )
+
+
+with(kelp_df, c(R_total_over_GP = sum(R_prod_umolC + R_maint_umolC) / sum(GP_umolC),
+                B_fr_end_WW = tail(B_fr_WW, 1), B_th_end_WW = tail(B_th_WW, 1)))
+
+
+
+#--- Evaluate temperature range for comparison with Pontier ... 
+with(env_daily, {
+  sp <- real_DOY >= 115 & real_DOY <= 151   # Apr 25 - May 31 (partial spring)
+  su <- real_DOY >= 152 & real_DOY <= 243   # Jun - Aug
+  fa <- real_DOY >= 244                     # Sep (partial fall)
+  rbind(spring = range(Temp[sp]), summer = range(Temp[su]), fall = range(Temp[fa]))
+})
+
+#--- Check on senescence ... 
+with(kelp_df, plot(real_DOY, c(NA, diff(B_fr)), type = "l", ylab = "daily change in frond g DW"))
 
 # Jan29: Reasonably well parameterized, except DOC leakage and respiration
 # fall of the cliff with higher temps (beyond 12C). This is new with the Gaussian
 # updated fT curve. But it is also reasonable, and logical give the T constraint.
 # Check into this later, with respect to field temps and moorings. 
 # Chat says to Increase sigma_warm until: fT ≈ 0.3–0.5 at late-season temperatures
-
 plot_fT_curve()
 plot_fL_curve()
-
-plot_C_losses(kelp_df, log_y=T )
+plot_C_losses(kelp_df, log_y=F )
 plot_temperature_scaling( env_daily )
 plot_DLI_scaling( env_daily )
-summary(fT_reparam(env_daily$Temp))
-
-sum(kelp_df$B_fr[144]) + sum(kelp_df$B_th[144])
 
 
-kelp_df$B_fr / kelp_df$B_th
+# comparing total and maintenance respiration ... 
+with(kelp_df, c(R_total_over_GP = sum(R_prod_umolC + R_maint_umolC) / sum(GP_umolC),
+                R_maint_over_GP = sum(R_maint_umolC) / sum(GP_umolC)))
+
+#---- Sensiivity analyses ----
+
+run_N <- function(Ks = 1, N_uM = NULL) {
+  p <- model_params
+  p$Ks_N <- Ks
+  if (!is.null(N_uM)) p$N_anchor_uM <- rep(N_uM, length(p$N_anchor_uM))
+  o <- ode(initial_state, times, grow_kelp_model, p, env_data = env_daily, method = "rk4")
+  tail(o[, "B_th"] + o[, "B_fr"], 1) / p$wet_to_dry   # final total, g WW
+}
+c(no_limit = run_N(N_uM = 20),   # should match the earlier ~1,250 g WW
+  Ks_0.5   = run_N(Ks = 0.5),
+  Ks_1     = run_N(Ks = 1),
+  Ks_2     = run_N(Ks = 2),
+  N_flat_5 = run_N(N_uM = 5))
+
+
+run_s <- function(s) {
+  p <- model_params; p$stipe_resp_frac <- s
+  o <- as.data.frame(ode(initial_state, times, grow_kelp_model, p,
+                         env_data = env_daily, method = "rk4"))
+  c(R_maint_sum = sum(o$R_maint_umolC),
+    B_th_end = tail(o$B_th, 1) / p$wet_to_dry,
+    B_fr_end = tail(o$B_fr, 1) / p$wet_to_dry,
+    total_end = (tail(o$B_th, 1) + tail(o$B_fr, 1)) / p$wet_to_dry)
+}
+rbind(`1` = run_s(1), `0.33` = run_s(0.33))
 
 
 
-35/24
 
-summary(kelp_df$fR)
+
+
+
+
 
 
 

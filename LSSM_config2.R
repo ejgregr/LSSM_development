@@ -213,36 +213,80 @@ get_daylight_hours <- function( par ) {
 
 #---------------------------- DEB Plotting Functions ---------------------------
 
+# Updated to ensure that DW->WW conversion is timely and updated x axis label with date
 plot_kelp_biomass_WW <- function(out_df,
-                              time_col="time", bth_col="B_th_WW", bfr_col="B_fr_WW",
-                              log_y = FALSE) {
+                                 wet_to_dry = model_params$wet_to_dry,
+                                 time_col = "real_DOY",
+                                 months = TRUE,
+                                 bth_col  = "B_th",
+                                 bfr_col  = "B_fr",
+                                 year = 2025,          # sets month start days (leap-year safe)
+                                 log_y = FALSE) {
   stopifnot(all(c(time_col, bth_col, bfr_col) %in% names(out_df)))
+  
+  th <- out_df[[bth_col]] / wet_to_dry   # g DW -> g WW
+  fr <- out_df[[bfr_col]] / wet_to_dry
   
   df_long <- data.frame(
     time    = rep(out_df[[time_col]], 3),
-    biomass = c(out_df[[bfr_col]],
-                out_df[[bth_col]],
-                out_df[[bfr_col]] + out_df[[bth_col]]),
-    series  = factor(rep(c("Frond", "Stipe", "Total"),
-                         each = nrow(out_df)),
+    biomass = c(fr, th, fr + th),
+    series  = factor(rep(c("Frond", "Stipe", "Total"), each = nrow(out_df)),
                      levels = c("Frond", "Stipe", "Total"))
   )
   
-  p <- ggplot2::ggplot(df_long, ggplot2::aes(x = time, y = biomass,
-                                             color = series)) +
+  p <- ggplot2::ggplot(df_long, ggplot2::aes(x = time, y = biomass, color = series)) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
     ggplot2::geom_line(linewidth = 1) +
-    ggplot2::labs(x = "Time (days)",
-                  y = "Biomass (g WW)",
-                  color = NULL,
-                  linetype = NULL) +
+    ggplot2::labs(y = "Biomass (g WW)", color = NULL) +
     ggplot2::theme_classic()
   
-  if (log_y) {
-    p <- p + ggplot2::scale_y_log10()
+  if (time_col == "real_DOY" && months == TRUE) {
+    # DOY of the 1st of each month; keep those inside the data range
+    month_start <- as.numeric(format(as.Date(sprintf("%d-%02d-01", year, 1:12)), "%j"))
+    rng  <- range(out_df[[time_col]], na.rm = TRUE)
+    keep <- month_start >= rng[1] & month_start <= rng[2]
+    p <- p +
+      ggplot2::scale_x_continuous(breaks = month_start[keep], labels = month.abb[keep]) +
+      ggplot2::labs(x = NULL)
+  } else {
+    p <- p + ggplot2::labs(x = "Time (days since start)")
   }
   
+  if (log_y) p <- p + ggplot2::scale_y_log10()
   p
 }
+
+
+# plot_kelp_biomass_WW <- function(out_df,
+#                               time_col="time", bth_col="B_th_WW", bfr_col="B_fr_WW",
+#                               log_y = FALSE) {
+#   stopifnot(all(c(time_col, bth_col, bfr_col) %in% names(out_df)))
+#   
+#   df_long <- data.frame(
+#     time    = rep(out_df[[time_col]], 3),
+#     biomass = c(out_df[[bfr_col]],
+#                 out_df[[bth_col]],
+#                 out_df[[bfr_col]] + out_df[[bth_col]]),
+#     series  = factor(rep(c("Frond", "Stipe", "Total"),
+#                          each = nrow(out_df)),
+#                      levels = c("Frond", "Stipe", "Total"))
+#   )
+#   
+#   p <- ggplot2::ggplot(df_long, ggplot2::aes(x = time, y = biomass,
+#                                              color = series)) +
+#     ggplot2::geom_line(linewidth = 1) +
+#     ggplot2::labs(x = "Time (days)",
+#                   y = "Biomass (g WW)",
+#                   color = NULL,
+#                   linetype = NULL) +
+#     ggplot2::theme_classic()
+#   
+#   if (log_y) {
+#     p <- p + ggplot2::scale_y_log10()
+#   }
+#   
+#   p
+# }
 
 plot_kelp_biomass_DW <- function(out_df,
                               time_col="time", bth_col="B_th", bfr_col="B_fr",
