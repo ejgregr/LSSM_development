@@ -235,7 +235,9 @@ model_params$th_max_ratio <- model_params$th_slope + model_params$th_int / model
 # 1. Define initial state (start with small kelp plant)
 # Starting biomass (DW) based on young sporophyte with established first frond = 1 to 4 g WW total.
 # B_fr0 is the frond mass; the stipe starts at its allometric target.
-B_fr0 <- 15 * model_params$wet_to_dry
+
+#--- 26 Nov 2: 16 is the final answer here. See report.
+B_fr0 <- 16 * model_params$wet_to_dry
 
 initial_state <- c(
   B_th = stipe_target(B_fr0, model_params),

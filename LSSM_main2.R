@@ -18,7 +18,7 @@
 #       NOTE: this fixed the DLI which now matches the values reported by Pontier.
 # 26Jan29: Nice stable, parameterized version of LSSM 'DEB'. Easy to run and 
 #   ready for chemistry.
-
+# 26Nov02: Reparameterization of growth model complete. 
 #################################################################################
 rm(list=ls(all=T)) # Erase environment.
 set.seed(42)       # Setting seed for reproducibility
@@ -80,12 +80,9 @@ plot_kelp_biomass_WW(kelp_df, time_col = "real_DOY", months = F, log=F )
 
 plot( kelp_df$net_daily_gDW ~ kelp_df$real_DOY)
 
-
-
+# For the report ... 
 with(kelp_df, c(R_total_over_GP = sum(R_prod_umolC + R_maint_umolC) / sum(GP_umolC),
                 B_fr_end_WW = tail(B_fr_WW, 1), B_th_end_WW = tail(B_th_WW, 1)))
-
-
 
 #--- Evaluate temperature range for comparison with Pontier ... 
 with(env_daily, {
@@ -98,17 +95,12 @@ with(env_daily, {
 #--- Check on senescence ... 
 with(kelp_df, plot(real_DOY, c(NA, diff(B_fr)), type = "l", ylab = "daily change in frond g DW"))
 
-# Jan29: Reasonably well parameterized, except DOC leakage and respiration
-# fall of the cliff with higher temps (beyond 12C). This is new with the Gaussian
-# updated fT curve. But it is also reasonable, and logical give the T constraint.
-# Check into this later, with respect to field temps and moorings. 
-# Chat says to Increase sigma_warm until: fT ≈ 0.3–0.5 at late-season temperatures
-plot_fT_curve()
+# 26Nov02: Re-parameterization complete. No fudging anywhere. Draft report completed (Word Doc).
+ plot_fT_curve()
 plot_fL_curve()
-plot_C_losses(kelp_df, log_y=F )
+plot_C_losses(kelp_df, log_y= F )
 plot_temperature_scaling( env_daily )
 plot_DLI_scaling( env_daily )
-
 
 # comparing total and maintenance respiration ... 
 with(kelp_df, c(R_total_over_GP = sum(R_prod_umolC + R_maint_umolC) / sum(GP_umolC),
@@ -144,14 +136,6 @@ rbind(`1` = run_s(1), `0.33` = run_s(0.33))
 
 
 
-
-
-
-
-
-
-
-
 #---- Part 3: Calculate chemistry changes during  growing season ----
 # This script returns sim_out df - a landscape of kelp density by exposure time
 # for a 1 kg parcel of water. 
@@ -169,10 +153,8 @@ dpH_df <- make_dpH_summary_df( sim_out )
 # Facet plot of difference from measured. 
 x <- filter_outliers( dpH_df, 0.02 )
 
-
 dim(dpH_df)
 dim(x)
-
 
 # Facet plotting ... 
 # Showing the variability in predictive success. 
@@ -182,7 +164,6 @@ df_hm <- x %>%
   mutate(
     Date_f = factor(Date, levels = sort(unique(Date)))
   )
-
 
 ggplot(df_hm, aes(x = Site, y = Date_f, fill = match_error)) +
   geom_tile(colour = "white", linewidth = 0.2) +
