@@ -36,12 +36,15 @@ input_path <- file.path(source_dir, "kelp_project_data_2026_10_19.RData" )
 #input_path <- file.path(DEB_dir, "kelp_project_data_2026_01_13.RData" )
 load(input_path)
 
-# Oct 18: Change to PREP discrete for inside/outside pH comparison if needed
-# inout_data <- load_discrete_samples()
+# Minor data corrections to push back to data loading script ... 
+# NB: Root of problem is that as.Date() assumes UTC for POSIX instead of checking tz.
+PAR_df$DateTime <- as.POSIXct(PAR_df$DateTime, format = "%Y-%m-%d %H:%M:%S", tz = "America/Vancouver")
+attr(PAR_df$DateTime, "tzone")
+
 
 # Set temporal window to match moorings ... 
-start_date <- "2023-04-25 00:00:00 PDT"
-end_date   <- "2023-09-15 00:00:00 PDT"
+start_date <- "2025-04-25 00:00:00 PDT"
+end_date   <- "2025-09-15 00:00:00 PDT"
 
 #---- Part 1: Assemble environmental drivers for DEB ----
 # Assembles temperature, salinity, CO2, DLI, and oxygen from moorings, 
@@ -56,7 +59,6 @@ head(env_daily)
 
 #Add real DOY for plotting etc.
 env_daily <- cbind(env_daily, "real_DOY" = as.integer(format(as.Date( env_daily$Datestamp ), "%j")) )
-plot(env_daily$DLI)
 
 # Daylight hours for the days in env_daily 
 day_hours <- get_daylight_hours( PAR_env )
@@ -65,7 +67,6 @@ day_hours <- get_daylight_hours( PAR_env )
 env_daily <- env_daily %>%
   left_join(day_hours, by = "Datestamp")
 
-tail(env_daily)
 
 #----------------------- Load and run the ODE model  ---------------------------
 # REQUIRES dataframe env_daily
@@ -73,12 +74,17 @@ stopifnot(all(c("Temp","DLI","day_hours","night_hours","real_DOY","day") %in% na
 source( "LSSM_DEB2.R" )
 # creates dataframe kelp_df
 #---------------------- Visualization and diagnostics --------------------------
-plot_kelp_biomass_WW(kelp_df, log=F ) 
-tail( kelp_df )
 
-plot_kelp_biomass_WW(kelp_df, time_col = "real_DOY", months = F, log=F ) 
+#--- Series of plots to summarize results ----
 
-plot( kelp_df$net_daily_gDW ~ kelp_df$real_DOY)
+# Note this plot has several paramters ... 
+plot_kelp_biomass_WW(kelp_df, log_y=F ) 
+#tail( kelp_df )
+#plot( kelp_df$net_daily_gDW ~ kelp_df$real_DOY)
+
+plot_C_budget( kelp_df )
+
+plot_allometry( kelp_df )
 
 # For the report ... 
 with(kelp_df, c(R_total_over_GP = sum(R_prod_umolC + R_maint_umolC) / sum(GP_umolC),
@@ -96,64 +102,34 @@ with(env_daily, {
 with(kelp_df, plot(real_DOY, c(NA, diff(B_fr)), type = "l", ylab = "daily change in frond g DW"))
 
 # 26Nov02: Re-parameterization complete. No fudging anywhere. Draft report completed (Word Doc).
- plot_fT_curve()
+plot_fT_curve()
 plot_fL_curve()
 plot_C_losses(kelp_df, log_y= F )
 plot_temperature_scaling( env_daily )
 plot_DLI_scaling( env_daily )
 
-# comparing total and maintenance respiration ... 
+# comparing total and maintenance respiration (used in report) ... 
 with(kelp_df, c(R_total_over_GP = sum(R_prod_umolC + R_maint_umolC) / sum(GP_umolC),
                 R_maint_over_GP = sum(R_maint_umolC) / sum(GP_umolC)))
 
-#---- Sensiivity analyses ----
 
-run_N <- function(Ks = 1, N_uM = NULL) {
-  p <- model_params
-  p$Ks_N <- Ks
-  if (!is.null(N_uM)) p$N_anchor_uM <- rep(N_uM, length(p$N_anchor_uM))
-  o <- ode(initial_state, times, grow_kelp_model, p, env_data = env_daily, method = "rk4")
-  tail(o[, "B_th"] + o[, "B_fr"], 1) / p$wet_to_dry   # final total, g WW
-}
-c(no_limit = run_N(N_uM = 20),   # should match the earlier ~1,250 g WW
-  Ks_0.5   = run_N(Ks = 0.5),
-  Ks_1     = run_N(Ks = 1),
-  Ks_2     = run_N(Ks = 2),
-  N_flat_5 = run_N(N_uM = 5))
-
-
-run_s <- function(s) {
-  p <- model_params; p$stipe_resp_frac <- s
-  o <- as.data.frame(ode(initial_state, times, grow_kelp_model, p,
-                         env_data = env_daily, method = "rk4"))
-  c(R_maint_sum = sum(o$R_maint_umolC),
-    B_th_end = tail(o$B_th, 1) / p$wet_to_dry,
-    B_fr_end = tail(o$B_fr, 1) / p$wet_to_dry,
-    total_end = (tail(o$B_th, 1) + tail(o$B_fr, 1)) / p$wet_to_dry)
-}
-rbind(`1` = run_s(1), `0.33` = run_s(0.33))
-
-
-
-
+#------------------------------------------------------------------------------
 #---- Part 3: Calculate chemistry changes during  growing season ----
 # This script returns sim_out df - a landscape of kelp density by exposure time
 # for a 1 kg parcel of water. 
-
 # NB: This takes a few minutes to create 'sim_out').
+
+# 26Nov02: disc_dat is the new source for "inout_data"
 source( "LSSM_chemistry2.R" )
 
 
-#---- Remainder of this code reflects the most recent (Jan 2026) work on examining the chemistry
-# 26Sep08: Runs without a hitch from top to bottom. 
-
+#---- This bit of code makes the facet plot, for those NOT filtered out. 
 dpH_df <- make_dpH_summary_df( sim_out )
 
-
 # Facet plot of difference from measured. 
-x <- filter_outliers( dpH_df, 0.02 )
+x <- filter_outliers( dpH_df, 0.1 )
 
-dim(dpH_df)
+summary(dpH_df)
 dim(x)
 
 # Facet plotting ... 
@@ -187,7 +163,7 @@ ggplot(df_hm, aes(x = Site, y = Date_f, fill = match_error)) +
   )
 
 
-#------------ Plot the BIG plot of tea landscape with paired samples -------
+#---- This plots the BIG plot of tea landscape with paired samples -------
 
 # Interpolate all the surfaces from the simulation ...
 surf_all <- build_interp_grid_data(sim_out$sims, nx = 200, ny = 200, z_col = "dpH_end")
@@ -212,7 +188,7 @@ label_df <- surf_all_ok %>%
   dplyr::summarise(
     dpH_obs = dpH_obs[1],
     x_lab = min(exposure_hours, na.rm = TRUE),
-    y_lab = max(kelp_density_gdwkg, na.rm = TRUE),
+    y_lab = max(kelp_density_plants_m2, na.rm = TRUE),
     .groups = "drop"
   )
 

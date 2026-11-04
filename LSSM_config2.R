@@ -1,15 +1,20 @@
-#----------------------------------------------------------------------------
+#################################################################################
 # Script:  LSSM_config2.R
 # Created: January 13 2026. 
 # Purpose: Support second iteration of the nereo growth and chemistry work
 #          Includes packages, paths, and functions.
 # Notes:
+#  - Early development supported by ChatGPT AI
 #  - Feb 16: Added Chemistry functions. Lots of funky plotting. 
+#----------------------------------------------------------------------------
 # Updates:
 # 26Oct18: 
 # - Removed all data loading functions (these are now in LSSM_Water_Analysis.proj)
-#
-#================================== Load require packages =================================
+#  26Nov: 
+# - Major revisions as part of re-factoring the code. This time with Claude AI
+#################################################################################
+
+#---- Load require packages ----
 # check for any required packages that aren't installed and install them
 required.packages <- c( "ggplot2", "reshape2", "lubridate", "dplyr", "stringr",
                         "rmarkdown","knitr", "tinytex", "kableExtra", #currently causing trouble.
@@ -30,7 +35,7 @@ lapply(required.packages, require, character.only = TRUE)
 #lapply(required.packages, library, character.only = TRUE)
 version$version.string
 
-#==== Configuration ====
+#---- Configuration ----
 bc_time <- 'America/Vancouver'
 
 data_dir <- "C:/Data/Git/LSSM_prototype/Data"
@@ -40,174 +45,54 @@ source_dir <- "C:/Data/Git/LSSM_water_analysis/Results"
 
 #-------------------- SUPPORT FUNCTIONS ----------------------------------
 #           Nothing should be created below here 
+# NOTE: Discrete data now loaded in water_analysis.proj. 
 
-# Load and prep the discrete water samples.
-# Copied from LSSM_Water_Quality.prj. discrete_sample_loading.R
-load_discrete_samples <- function(){
-  # SOURCE modified during development to deal with inconsistent data:
-  #   RPtoRK : 2 codes for the same site
-  #   _B     : Dropped one CP replicate from May 13
-  x <- read_excel( paste0( source_dir, '/Discrete_sample_data/discrete_data_for_model_development_RPtoRK_B.xls' ))
-  
-  # Pull and simplify names of a relevant subset of data
-  disc_data <- x[, c("Station_ID", "Collection_Date", "Collection_Time_PST",
-                     "NIST_Temp", "YSI_S", "TA (umol/kg)", "pCO2@insituT (uatm)", "pH (total)")]
-  colnames(disc_data) <- c("Station", "Date", "Time", "Temp", "Salt", "TA", "pCO2", "pH")
-  head(disc_data)
-  
-  #Fix Temp
-  disc_data$Temp <- as.numeric(disc_data$Temp)
-  # Adjust and format Date and Time columns
-  # Convert Excel fractional day value -> seconds -> 24 hr time
-  disc_data$Time <- hms::hms(round(as.numeric(disc_data$Time) * 86400))
-  # Format date
-  disc_data$Date <- as.Date(disc_data$Date)
-  # Add DateTime column
-  disc_data$DateTime <- as.POSIXct(disc_data$Date) + disc_data$Time
-  
-  # Standardize station names 
-  #   Replace 'in' with '_In' and 'out' with '_Out' at the end of station names
-  disc_data$Station <- gsub("\\s*[iI][nN]$", "_In", disc_data$Station)
-  disc_data$Station <- gsub("\\s*[oO][uU][tT]$", "_Out", disc_data$Station)
-  
-  # Check dataframe
-  head( disc_data )
-  class( disc_data )
-  
-  #--- Working with kelp bed pairs, first pull all In and Outs.
-  #  Parse site and in/out flag from Station
-  inout_data <- disc_data %>%
-    mutate(
-      Site = str_remove(Station, "_(In|Out)$"),
-      IO   = case_when(
-        str_detect(Station, "_In$")  ~ "In",
-        str_detect(Station, "_Out$") ~ "Out",
-        TRUE ~ NA_character_
-      )
-    ) %>%
-    # Keep only rows with valid suffix
-    filter(!is.na(IO))
-  
-  return( inout_data )
+#-------------------------- DEB Support Functions ---------------------------- 
+# Functions to scale T and DLI effects as per Pontier et al.
+
+# Warm-side Gaussian penalty with a cold-side plateau. Simple representation of
+# the warm temperature limitation identified by Pontier et al. 
+fT_reparam <- function(T_C, T_opt = 10.0, sigma_warm = 1.4) {
+  ifelse(
+    T_C <= T_opt,
+    1.0,
+    exp(- (T_C - T_opt)^2 / (2 * sigma_warm^2))
+  )
 }
 
-
-#--------------------------- Light Support Functions ---------------------------
-
-make_env_hourly <- function(PAR_df, Temp_df, tz = "UTC",
-                            fill_method = c("locf", "linear")) {
-  fill_method <- match.arg(fill_method)
+# --- DLI scaling for blades: hump-shaped with low- and high-light penalties ---
+# Approx ~23% gain per +10 DLI near ~20 (low-light side) and ~23% loss per +10 above ~40 (high-light side)
+fL_reparam <- function(DLI, L_low = 20, L_high = 40, 
+                       low_gain_per_10 = 0.23,   # interpreted as "being 10 below optimal costs ~23%"
+                       high_loss_per_10 = 0.23) {
   
-  parse_utc <- function(x) {
-    if (inherits(x, "POSIXct") || inherits(x, "POSIXt")) return(with_tz(x, tz))
-    x_chr <- as.character(x)
-    suppressWarnings(parse_date_time(
-      x_chr,
-      orders = c("Ymd HMS", "Y-m-d H:M:S", "Y-m-d H:M:S z", "Y-m-d H:M z"),
-      tz = tz
-    ))
-  }
+  # Convert to multipliers:
+  # low side: at (L_low - 10) -> multiplier ~ (1 - 0.23) = 0.77
+  m_low10  <- 1 - low_gain_per_10
+  k_low    <- k_from_multiplier(m_low10, 10)   # per (mol m^-2 d^-1)
   
-  # Parse + clean
-  PAR_clean <- PAR_df %>%
-    mutate(DateTime = parse_utc(Timestamp)) %>%
-    filter(!is.na(DateTime)) %>%
-    transmute(DateTime, PAR = as.numeric(PAR)) %>%
-    arrange(DateTime)
+  # high side: at (L_high + 10) -> multiplier ~0.77
+  m_high10 <- 1 - high_loss_per_10
+  k_high   <- k_from_multiplier(m_high10, 10)  # per (mol m^-2 d^-1)
   
-  Temp_clean <- Temp_df %>%
-    mutate(DateTime = parse_utc(Timestamp)) %>%
-    filter(!is.na(DateTime)) %>%
-    mutate(DateTime = floor_date(DateTime, "hour")) %>%
-    group_by(DateTime) %>%
-    summarise(temp = mean(Temp, na.rm = TRUE), .groups = "drop") %>%
-    arrange(DateTime)
-  
-  if (nrow(PAR_clean) == 0) stop("No PAR rows after parsing Timestamp.")
-  if (nrow(Temp_clean) == 0) stop("No Temp rows after parsing Timestamp.")
-  
-  # Overlap window (robust)
-  par_rng  <- range(PAR_clean$DateTime,  na.rm = TRUE)
-  tmp_rng  <- range(Temp_clean$DateTime, na.rm = TRUE)
-  t0 <- max(par_rng[1], tmp_rng[1])
-  t1 <- min(par_rng[2], tmp_rng[2])
-  if (t0 > t1) {
-    stop(sprintf("No overlap between PAR (%s to %s) and Temp (%s to %s).",
-                 par_rng[1], par_rng[2], tmp_rng[1], tmp_rng[2]))
-  }
-  
-  # Build an hourly grid over the overlap
-  grid <- tibble(DateTime = seq(from = ceiling_date(t0, "hour"),
-                                to   = floor_date(t1, "hour"),
-                                by   = "hour"))
-  
-  # Join both series to the grid
-  env_hourly <- grid %>%
-    left_join(PAR_clean,  by = "DateTime") %>%
-    left_join(Temp_clean, by = "DateTime") %>%
-    arrange(DateTime)
-  
-  # Fill gaps
-  if (fill_method == "locf") {
-    env_hourly <- env_hourly %>%
-      fill(PAR, temp, .direction = "downup")
-  } else {
-    # linear interpolation; requires at least 2 non-NA points
-    env_hourly <- env_hourly %>%
-      mutate(
-        PAR  = as.numeric(PAR),
-        temp = as.numeric(temp)
-      )
-    
-    env_hourly$PAR  <- approx(x = env_hourly$DateTime[!is.na(env_hourly$PAR)],
-                              y = env_hourly$PAR[!is.na(env_hourly$PAR)],
-                              xout = env_hourly$DateTime,
-                              rule = 2)$y
-    env_hourly$temp <- approx(x = env_hourly$DateTime[!is.na(env_hourly$temp)],
-                              y = env_hourly$temp[!is.na(env_hourly$temp)],
-                              xout = env_hourly$DateTime,
-                              rule = 2)$y
-  }
-  
-  # Hour index for deSolve forcing
-  env_hourly %>%
-    mutate(time_h = as.numeric(difftime(DateTime, min(DateTime), units = "hours")))
-}
-
-# NOTE DLI is already daily. Temperature is averaged.
-make_env_daily <- function(dli_df, temp_df) {
-  # 1. Process temperature: Convert to Date and calculate daily mean
-  temp_daily <- temp_df %>%
-    mutate(Datestamp = as.Date(Datestamp)) %>%
-    group_by(Datestamp) %>%
-    summarize(Temp = mean(Temp, na.rm = TRUE), .groups = "drop")
-  
-  # 2. Process DLI: Ensure Datestamp is Date type
-  dli_daily <- dli_df %>%
-    mutate(Datestamp = as.Date(Datestamp))
-  
-  # 3. Combine: Keep only dates where both measures exist
-  env_combined <- inner_join(dli_daily, temp_daily, by = "Datestamp") %>%
-    arrange(Datestamp) %>%
-    # Add a relative 'day' column for the ODE solver (0, 1, 2...)
-    mutate(day = as.numeric(Datestamp - min(Datestamp)))
-  
-  return(env_combined)
-}
-
-# Calc number of daylight hours per day based on hourly PAR
-get_daylight_hours <- function( par ) {
-  par %>%
-    # Ensure Timestamp is POSIXct and extract the Date
-    mutate(Datestamp = as.Date(Datestamp)) %>%
-    # Group by each day
-    group_by(Datestamp) %>%
-    # Count hours where PAR is greater than 0
-    summarize(
-      day_hours   = sum(PAR > 0, na.rm = TRUE),
-      night_hours = sum(PAR <= 0, na.rm = TRUE),
-      .groups = "drop"
+  out <- ifelse(
+    DLI < L_low,
+    exp(-k_low * (L_low - DLI)),           # decays below L_low
+    ifelse(
+      DLI <= L_high,
+      1.0,                                 # optimum plateau
+      exp(-k_high * (DLI - L_high))         # decays above L_high
     )
+  )
+  
+  # Keep bounded [0,1]
+  pmax(0, pmin(1, out))
+}
+
+# --- Helper for DLI scaling: convert "p% change per unit" into exponential rate constant ---
+# If multiplier per unit is m (e.g., 0.77 per +1°C), then k = -log(m) / unit
+k_from_multiplier <- function(multiplier, unit = 1) {
+  -log(multiplier) / unit
 }
 
 
@@ -256,64 +141,79 @@ plot_kelp_biomass_WW <- function(out_df,
   p
 }
 
-
-# plot_kelp_biomass_WW <- function(out_df,
-#                               time_col="time", bth_col="B_th_WW", bfr_col="B_fr_WW",
-#                               log_y = FALSE) {
-#   stopifnot(all(c(time_col, bth_col, bfr_col) %in% names(out_df)))
-#   
-#   df_long <- data.frame(
-#     time    = rep(out_df[[time_col]], 3),
-#     biomass = c(out_df[[bfr_col]],
-#                 out_df[[bth_col]],
-#                 out_df[[bfr_col]] + out_df[[bth_col]]),
-#     series  = factor(rep(c("Frond", "Stipe", "Total"),
-#                          each = nrow(out_df)),
-#                      levels = c("Frond", "Stipe", "Total"))
-#   )
-#   
-#   p <- ggplot2::ggplot(df_long, ggplot2::aes(x = time, y = biomass,
-#                                              color = series)) +
-#     ggplot2::geom_line(linewidth = 1) +
-#     ggplot2::labs(x = "Time (days)",
-#                   y = "Biomass (g WW)",
-#                   color = NULL,
-#                   linetype = NULL) +
-#     ggplot2::theme_classic()
-#   
-#   if (log_y) {
-#     p <- p + ggplot2::scale_y_log10()
-#   }
-#   
-#   p
-# }
-
-plot_kelp_biomass_DW <- function(out_df,
-                              time_col="time", bth_col="B_th", bfr_col="B_fr",
-                                 log_y = FALSE) {
-  stopifnot(all(c(time_col, bth_col, bfr_col) %in% names(out_df)))
+# Plot Daily carbon budget: gross production partitioned into DOC leakage, the two
+# respiration terms and the net carbon available for frond growth. The stack
+# height equals GP. Sloughing is drawn as a separate line because it is removed
+# from standing frond biomass, not from that day's GP.
+# Daily carbon budget per kelp: gross production partitioned into DOC leakage,
+# the two respiration terms and the net carbon available for frond growth.
+# The stack height equals GP. Sloughing is drawn as a separate line because it
+# is removed from standing frond biomass, not from that day's GP.
+plot_C_budget <- function(df, time_col = "real_DOY", months = TRUE, year = 2025,
+                          prop = FALSE,        # TRUE = fraction of GP instead of mmol C
+                          slough = TRUE) {     # draw sloughing line (ignored if prop = TRUE)
+  req <- c(time_col, "GP_umolC", "DOC_umolC", "R_prod_umolC", "R_maint_umolC", "Slough_umolC")
+  missing <- setdiff(req, names(df))
+  if (length(missing) > 0) stop("Missing columns: ", paste(missing, collapse = ", "))
   
-  df_long <- data.frame(
-    time    = rep(out_df[[time_col]], 3),
-    biomass = c(out_df[[bfr_col]],
-                out_df[[bth_col]],
-                out_df[[bfr_col]] + out_df[[bth_col]]),
-    series  = factor(rep(c("Frond", "Stipe", "Total"),
-                         each = nrow(out_df)),
-                     levels = c("Frond", "Stipe", "Total"))
+  to_mmol <- 1 / 1000                       # umol C -> mmol C
+  net <- df$GP_umolC - df$DOC_umolC - df$R_prod_umolC - df$R_maint_umolC
+  if (any(net < 0, na.rm = TRUE)) {
+    warning("Net carbon < 0 on ", sum(net < 0, na.rm = TRUE),
+            " days; negative values are shown as zero, so the stack is shorter than GP on those days.")
+    net <- pmax(net, 0)
+  }
+  
+  lev <- c("DOC leakage", "Production respiration", "Maintenance respiration", "Net carbon gain")
+  long <- data.frame(
+    day   = rep(df[[time_col]], 4),
+    mmolC = c(df$DOC_umolC, df$R_prod_umolC, df$R_maint_umolC, net) * to_mmol,
+    flux  = factor(rep(lev, each = nrow(df)), levels = lev)   # first level plots on top
   )
-
-  p <- ggplot2::ggplot(df_long, ggplot2::aes(x = time, y = biomass,
-                                             color = series)) +
-    ggplot2::geom_line(linewidth = 1) +
-    ggplot2::labs(x = "Time (days)",
-                  y = "Biomass (g DW)",
-                  color = NULL,
-                  linetype = NULL) +
+  
+  cols <- c("DOC leakage" = "#E69F00", "Production respiration" = "#56B4E9",
+            "Maintenance respiration" = "#0072B2", "Net carbon gain" = "#009E73")
+  
+  p <- ggplot2::ggplot(long, ggplot2::aes(x = day, y = mmolC, fill = flux)) +
+    ggplot2::geom_area(position = if (prop) "fill" else "stack", alpha = 0.9) +
+    ggplot2::scale_fill_manual(values = cols) +
+    ggplot2::labs(y = if (prop) "Fraction of gross production"
+                  else expression("mmol C kelp"^-1*" d"^-1),
+                  fill = NULL) +
     ggplot2::theme_classic()
   
-  if (log_y) {
-    p <- p + ggplot2::scale_y_log10()
+  if (slough && !prop) {
+    sl <- data.frame(day = df[[time_col]], mmolC = df$Slough_umolC * to_mmol)
+    p <- p + ggplot2::geom_line(data = sl,
+                                ggplot2::aes(x = day, y = mmolC, linetype = "Sloughing (as C)"),
+                                inherit.aes = FALSE, colour = "black", linewidth = 0.8) +
+      ggplot2::scale_linetype_manual(values = c("Sloughing (as C)" = "dashed")) +
+      ggplot2::labs(linetype = NULL)
+  }
+  
+  if (time_col == "real_DOY" && months) {
+    month_start <- as.numeric(format(as.Date(sprintf("%d-%02d-01", year, 1:12)), "%j"))
+    rng  <- range(df[[time_col]], na.rm = TRUE)
+    keep <- month_start >= rng[1] & month_start <= rng[2]
+    p <- p + ggplot2::scale_x_continuous(breaks = month_start[keep], labels = month.abb[keep],
+                                         expand = c(0, 0)) +
+      ggplot2::labs(x = NULL)
+  } else {
+    p <- p + ggplot2::scale_x_continuous(expand = c(0, 0)) + ggplot2::labs(x = "Day of year")
+  }
+  
+    # Legend inside the plot, top left
+  inside <- utils::packageVersion("ggplot2") >= "3.5.0"
+  p <- p + ggplot2::theme(
+    legend.justification = c(0, 1),
+    legend.background    = ggplot2::element_blank(),
+    legend.key.size      = ggplot2::unit(0.4, "cm"),
+    legend.spacing.y     = ggplot2::unit(0.1, "cm"))
+  p <- if (inside) {
+    p + ggplot2::theme(legend.position = "inside",
+                       legend.position.inside = c(0.02, 0.98))
+  } else {
+    p + ggplot2::theme(legend.position = c(0.02, 0.98))
   }
   
   p
@@ -354,6 +254,72 @@ plot_C_losses <- function(df, time_col = "real_DOY", log_y = FALSE) {
   }
   
   return(p)
+}
+
+# Stipe-frond allometry: the two-piece stipe target (Eq. 17), the Stekoll regression it
+# is built from, and the model's own trajectory. Plotted in g WW; log-log by default
+# so the small-plant branch is visible.
+# Stipe-frond allometry: the two-piece stipe target (Eq. 17), the Stekoll regression it
+# is built from, and the model's own trajectory. Plotted in g WW; log-log by default
+# so the small-plant branch is visible.
+plot_allometry <- function(kelp_df = NULL,
+                           pars = model_params,
+                           log = "xy") {
+  wd  <- pars$wet_to_dry
+  a   <- pars$th_slope                 # slope (ratio, unit-free)
+  b   <- pars$th_int / wd              # intercept, g WW (105.2)
+  Bx  <- pars$th_B_cross / wd          # g WW (50): limit of Stekoll data
+  rho <- pars$th_max_ratio             # 2.43
+  
+  lo <- if (grepl("x", log)) 1 else 0
+  hi <- 1200
+  x  <- if (lo > 0) exp(seq(log(lo), log(hi), length.out = 400)) else seq(lo, hi, length.out = 400)
+  reg    <- a * x + b                  # Stekoll regression, extended below Bx
+  target <- pmin(rho * x, a * x + b)   # model stipe target
+  ylo <- if (grepl("y", log)) 1 else 0
+  
+  op <- par(mar = c(4.5, 4.5, 1, 1) + 0.1); on.exit(par(op))
+  plot(x, target, type = "n", log = log, xlim = c(lo, hi),
+       ylim = c(max(ylo, min(target)), max(c(reg, target)) * 1.05),
+       xlab = "Frond biomass (g WW)", ylab = "Stipe and bulb biomass (g WW)", bty = "l")
+  u <- par("usr")
+  xl <- if (grepl("x", log)) 10^u[1] else u[1]
+  yl <- if (grepl("y", log)) 10^u[3] else u[3]
+  yh <- if (grepl("y", log)) 10^u[4] else u[4]
+  
+  # region below Bx: no data behind the regression
+  rect(xl, yl, Bx, yh, col = adjustcolor("grey90", 0.5), border = NA)
+  abline(v = Bx, lty = 2, col = "grey40")
+  
+  lines(x, reg, lty = 3, lwd = 2, col = "grey40")        # regression, extrapolated
+  lines(x, target, lwd = 3, col = "black")               # model target
+  
+  if (!is.null(kelp_df)) {                               # model trajectory
+    fr <- kelp_df$B_fr / wd; th <- kelp_df$B_th / wd
+    lines(fr, th, col = "steelblue", lwd = 2)
+    points(fr[1], th[1], pch = 21, bg = "white", col = "steelblue", cex = 1.6, lwd = 2)
+    n <- length(fr)
+    points(fr[n], th[n], pch = 16, col = "steelblue", cex = 1.6)
+    text(fr[1], th[1], "start", pos = 4, col = "steelblue", cex = 0.85)
+    text(fr[n], th[n], "end of run", pos = 1, col = "steelblue", cex = 0.85)
+  }
+  
+  # label for B_x, hung below the top edge (adj, not pos, so it isn't clipped)
+  text(Bx, yh, bquote(B[x] == .(round(Bx)) ~ "g WW"),
+       adj = c(-0.1, 1.5), cex = 0.8, col = "grey30")
+  text(xl, yh, expression(atop("no data below " * B[x], "(proportional branch assumed)")),
+       adj = c(-0.05, 1.3), cex = 0.8, col = "grey30")
+  
+  labs <- list(bquote("Proportional branch: " * B[th] == .(signif(rho, 3)) ~ B[fr]),
+               bquote("Stekoll et al. 2006 line: " * B[th] == .(a) ~ B[fr] + .(round(b, 1)) ~ "g WW"),
+               bquote("Regression extended below " * B[x]))
+  lty <- c(1, 1, 3); lwd <- c(3, 3, 2); col <- c("black", "black", "grey40")
+  if (!is.null(kelp_df)) {
+    labs <- c(labs, list("Model trajectory"))
+    lty <- c(lty, 1); lwd <- c(lwd, 2); col <- c(col, "steelblue")
+  }
+  legend("bottomright", bty = "n", cex = 0.85, legend = as.expression(labs),
+         lty = lty, lwd = lwd, col = col)
 }
 
 # Daily temperature and fT over the season, using the model's parameters.
@@ -431,98 +397,138 @@ plot_fL_curve <- function(L_low  = formals(fL_reparam)$L_low,
     ggplot2::theme_classic()
 }
 
-#-------------------------- DEB Support Functions ---------------------------- 
-# ChatGPT supported functions to scale T and DLI effects as per Pontier et al.
 
-# Warm-side Gaussian penalty with a cold-side plateau. Simple representation of
-# the warm temperature limitation identified by Pontier et al. 
-fT_reparam <- function(T_C, T_opt = 10.0, sigma_warm = 1.4) {
-  ifelse(
-    T_C <= T_opt,
-    1.0,
-    exp(- (T_C - T_opt)^2 / (2 * sigma_warm^2))
-  )
+# ----------------- Water-sample pairing and preparation  -----------------------
+
+# Combines Inside / Outside water samples by Site & Date, giving a single row 
+# per paired event w clearly labeled _In / _Out carbonate and physical variables.
+# Returns one row per Site x Date, with variables suffixed _In / _Out. 
+# IO and Site come from Station (e.g. CP_In); Drops stations without _In/_Out suffix.
+make_pairs_out_in <- function(chem_water) {
+  chem_water %>%
+    mutate(IO   = case_when(grepl("_in$",  Station, ignore.case = TRUE) ~ "In",
+                            grepl("_out$", Station, ignore.case = TRUE) ~ "Out"),
+           Site = sub("_(in|out)$", "", Station, ignore.case = TRUE),
+           Date = as.Date(DateTime, tz = bc_time) ) %>%
+    filter(!is.na(IO)) %>%
+    average_replicates() %>%
+    pivot_wider(id_cols = c(Site, Date), names_from = IO,
+                values_from = c(DateTime, Temp, Salinity, TA, pH, pCO2, DIC, OArag),
+                names_sep = "_") %>%
+    drop_na()
 }
 
-# --- DLI scaling for blades: hump-shaped with low- and high-light penalties ---
-# Approx ~23% gain per +10 DLI near ~20 (low-light side) and ~23% loss per +10 above ~40 (high-light side)
-fL_reparam <- function(DLI, L_low = 20, L_high = 40, 
-                       low_gain_per_10 = 0.23,   # interpreted as "being 10 below optimal costs ~23%"
-                       high_loss_per_10 = 0.23) {
+# Joins paired water samples to DEB day & env_daily day/night hrs. Select by DOY
+# pulled from water sample. DEB provides kelp carbon uptake rates and day/night 
+# photoperiod info to each sampling event.
+merge_pairs_with_deb_days <- function(pairs_df,
+                                      kelp_df,
+                                      env_daily,
+                                      deb_doy_col = "real_DOY",
+                                      env_doy_col = "real_DOY") {
   
-  # Convert to multipliers:
-  # low side: at (L_low - 10) -> multiplier ~ (1 - 0.23) = 0.77
-  m_low10  <- 1 - low_gain_per_10
-  k_low    <- k_from_multiplier(m_low10, 10)   # per (mol m^-2 d^-1)
+  pairs_df %>%
+    mutate(DOY = yday(Date)) %>%
+    left_join(kelp_df %>% mutate(DOY = .data[[deb_doy_col]]), by = "DOY") %>%
+    left_join(env_daily %>% mutate(DOY = .data[[env_doy_col]]) %>%
+                select(DOY, day_hours, night_hours),
+              by = "DOY")
+}
+
+# Helper function for make_pairs_out_in()
+# Average replicate samples (same Site x Date x IO), printing the records involved.
+average_replicates <- function(d) {
+  reps <- d %>%
+    group_by(Site, Date, IO) %>% filter(n() > 1) %>% ungroup() %>%
+    arrange(Site, Date, IO, DateTime) %>%
+    select(Site, Date, IO, DateTime, Temp, Salinity, TA, pH, pCO2, DIC)
+  if (nrow(reps) > 0) {
+    message("Averaging ", nrow(reps), " replicate records:")
+    print(as.data.frame(reps), row.names = FALSE)
+  }
+  d %>%
+    group_by(Site, Date, IO) %>%
+    summarise(across(c(DateTime, Temp, Salinity, TA, pH, pCO2, DIC, OArag), mean), .groups = "drop")
+}
+
+# NOTE DLI is already daily. Temperature is averaged.
+make_env_daily <- function(dli_df, temp_df) {
+  # 1. Process temperature: Convert to Date and calculate daily mean
+  temp_daily <- temp_df %>%
+    mutate(Datestamp = as.Date(Datestamp, tz = bc_time)) %>%
+    group_by(Datestamp) %>%
+    summarize(Temp = mean(Temp, na.rm = TRUE), .groups = "drop")
   
-  # high side: at (L_high + 10) -> multiplier ~0.77
-  m_high10 <- 1 - high_loss_per_10
-  k_high   <- k_from_multiplier(m_high10, 10)  # per (mol m^-2 d^-1)
+  # 2. Process DLI: Ensure Datestamp is Date type
+  dli_daily <- dli_df %>%
+    mutate(Datestamp = as.Date(Datestamp, tz = bc_time))
   
-  out <- ifelse(
-    DLI < L_low,
-    exp(-k_low * (L_low - DLI)),           # decays below L_low
-    ifelse(
-      DLI <= L_high,
-      1.0,                                 # optimum plateau
-      exp(-k_high * (DLI - L_high))         # decays above L_high
+  # 3. Combine: Keep only dates where both measures exist
+  env_combined <- inner_join(dli_daily, temp_daily, by = "Datestamp") %>%
+    arrange(Datestamp) %>%
+    # Add a relative 'day' column for the ODE solver (0, 1, 2...)
+    mutate(day = as.numeric(Datestamp - min(Datestamp)))
+  
+  return(env_combined)
+}
+
+# Calc number of daylight hours per day based on hourly PAR
+get_daylight_hours <- function( par ) {
+  par %>%
+    # Ensure Timestamp is POSIXct and extract the Date
+    mutate(Datestamp = as.Date(Datestamp, tz = bc_time)) %>%
+    # Group by each day
+    group_by(Datestamp) %>%
+    # Count hours where PAR is greater than 0
+    summarize(
+      day_hours   = sum(PAR > 0, na.rm = TRUE),
+      night_hours = sum(PAR <= 0, na.rm = TRUE),
+      .groups = "drop"
     )
-  )
-  
-  # Keep bounded [0,1]
-  pmax(0, pmin(1, out))
 }
-
-# --- Helper for DLI scaling: convert "p% change per unit" into exponential rate constant ---
-# If multiplier per unit is m (e.g., 0.77 per +1°C), then k = -log(m) / unit
-k_from_multiplier <- function(multiplier, unit = 1) {
-  -log(multiplier) / unit
-}
-
-
-#-------------------------- Chemistry Support Functions ------------------------ 
-# Code provided by ChatGPT Feb 2026. Human digestion in progress. 
-# The set of functions below is in the order that they are called to set up 
-# and run the kelp incubation simulation. 
 
 
 # ----------------- Carbonate chemistry Utilities -----------------------
-# closure on discrete samples: (TA + pH) -> DIC
-# Computes dissolved inorganic carbon (DIC, µmol kg⁻¹) from measured total 
-# alkalinity and pH using seacarb::carb() given temperature and salinity. 
-# Provides carbonate-system closure for discrete water samples.
-add_dic_from_ta_ph <- function(df) {
-  res <- seacarb::carb(
-    flag = 8,
-    var1 = df$pH,
-    var2 = df$TA,      # umol/kg
-    S    = df$Salt,
-    T    = df$Temp,
-    Patm = 1,
-    P    = 1,          # ~1 m
-    Pt   = 0,
-    Sit  = 0
-  )
-  df$DIC <- res$DIC    # umol/kg
+# A wrapper to filter incomplete rows and append DIC to the full discrete 
+# water dataset without aggregating by site or condition.
+# Adds total alkalinity (TA) and DIC, both in umol/kg, calculated from pCO2 and pH.
+add_DIC_Alk <- function(df) {
+  ok <- complete.cases(df[, c("Temp", "Salinity", "pCO2", "pH")])
+  if (any(!ok)) message("Dropped ", sum(!ok), " rows with missing T, S, pCO2 or pH.")
+  df <- df[ok, ]
+  
+  res <- seacarb::carb(flag = 21, var1 = df$pCO2, var2 = df$pH,   # pCO2 (uatm), pH (total)
+                       S = df$Salinity, T = df$Temp, Patm = 1, P = 1, Pt = 0, Sit = 0)
+  df$TA  <- res$ALK * 1e6    # seacarb returns mol/kg
+  df$DIC <- res$DIC * 1e6
   df
 }
 
-# A wrapper to filter incomplete rows and append DIC to the full discrete 
-# water dataset without aggregating by site or condition.
-add_DIC_no_grouping <- function(df) {
-  req_vars <- c("Station","Date","Time","Temp","Salt","TA","pCO2","pH","DateTime","Site","IO")
-  df_clean <- df %>%
-    dplyr::select(any_of(req_vars)) %>%
-    tidyr::drop_na(Temp, Salt, TA, pH)
+# TA vs salinity: scatter, linear fit with 95% CI band, and residuals vs salinity.
+# df needs Salinity and TA (umol/kg). Returns the lm object.
+fit_TA_salinity <- function(df) {
+  df <- df[complete.cases(df[, c("Salinity", "TA")]), ]
+  m  <- lm(TA ~ Salinity, data = df)
+  print(summary(m)); print(confint(m))
   
-  if (nrow(df_clean) < nrow(df)) {
-    message("Dropped ", nrow(df) - nrow(df_clean),
-            " rows with missing carbonate inputs.")
-  }
+  op <- par(mfrow = c(1, 2), mar = c(4.5, 4.5, 1, 1)); on.exit(par(op))
   
-  add_dic_from_ta_ph(df_clean)
+  sx <- seq(min(df$Salinity), max(df$Salinity), length.out = 100)
+  pr <- predict(m, data.frame(Salinity = sx), interval = "confidence")
+  plot(df$Salinity, df$TA, pch = 16, col = adjustcolor("steelblue", 0.6), bty = "l",
+       xlab = "Salinity", ylab = expression("TA ("*mu*"mol kg"^-1*")"))
+  polygon(c(sx, rev(sx)), c(pr[, 2], rev(pr[, 3])), col = adjustcolor("grey", 0.4), border = NA)
+  lines(sx, pr[, 1], lwd = 2)
+  s <- summary(m)
+  legend("topleft", bty = "n", cex = 0.85,
+         legend = c(sprintf("TA = %.1f + %.1f \u00D7 S", coef(m)[1], coef(m)[2]),
+                    sprintf("R\u00B2 = %.2f,  n = %d,  residual SD = %.1f", s$r.squared, nrow(df), s$sigma)))
+  
+  plot(df$Salinity, resid(m), pch = 16, col = adjustcolor("steelblue", 0.6), bty = "l",
+       xlab = "Salinity", ylab = expression("Residual TA ("*mu*"mol kg"^-1*")"))
+  abline(h = 0, lty = 2)
+  invisible(m)
 }
-
 
 # Computes pH from total alkalinity and DIC (holding TA constant) using seacarb::carb().
 # Translates modelled DIC changes into pH responses.
@@ -530,8 +536,8 @@ ph_from_ta_dic <- function(TA_umolkg, DIC_umolkg, S, T_C, P_dbar = 1) {
   # You confirmed this flag is correct in your setup.
   res <- seacarb::carb(
     flag = 15,            # TA + DIC -> pH (per your confirmation)
-    var1 = TA_umolkg,
-    var2 = DIC_umolkg,
+    var1 = TA_umolkg / 1e6,
+    var2 = DIC_umolkg /1e6,
     S    = S,
     T    = T_C,
     Patm = 1,
@@ -543,554 +549,158 @@ ph_from_ta_dic <- function(TA_umolkg, DIC_umolkg, S, T_C, P_dbar = 1) {
 }
 
 
-# ----------------- Water-sample pairing and preparation  -----------------------
-
-# Pairs Inside / Outside water samples by Site & Date, giving a single row 
-# per paired event w clearly labeled _In / _Out carbonate and physical variables.
-make_pairs_out_in <- function(water_with_dic) {
-  water_with_dic %>%
-    select(Station, Site, Date, DateTime, IO, Temp, Salt, TA, pH, pCO2, DIC) %>%
-    pivot_wider(
-      id_cols = c(Site, Date),
-      names_from = IO,
-      values_from = c(Station, DateTime, Temp, Salt, TA, pH, pCO2, DIC),
-      names_sep = "_"
-    ) %>%
-    drop_na(DIC_In, DIC_Out, TA_Out, pH_In, Temp_Out, Salt_Out, DateTime_Out)
-}
-
-# =============================================================================
-# 2) Compute biomass-specific day/night u_net from DEB + env_daily
-#
-# Assumptions (per your update):
-# - DEB includes net_daily_gDW (net inorganic C removal rate per gDW per day)
-#   Units expected: umol C gDW^-1 day^-1
-# - Day/night partitioning of net follows the ratio of GP_day_umolC : GP_night_umolC
-# - Use day_hours and night_hours from env_daily (no estimation)
-# =============================================================================
-
-# Partitions the DEB-provided net daily carbon uptake per gram dry weight (net_daily_gDW) 
-# into day and night hourly uptake rates, using the ratio of gross primary production 
-# during day and night and externally supplied day/night hours.
-compute_unet_day_night_from_deb <- function(row,
-                                            net_col   = "net_daily_gDW",
-                                            gp_day_col   = "GP_day_umolC",
-                                            gp_night_col = "GP_night_umolC",
-                                            day_hours_col   = "day_hours",
-                                            night_hours_col = "night_hours") {
-  
-  net_daily_gdw <- row[[net_col]]            # umol C gDW^-1 day^-1
-  gp_day <- row[[gp_day_col]]
-  gp_night <- row[[gp_night_col]]
-  
-  day_h <- row[[day_hours_col]]
-  night_h <- row[[night_hours_col]]
-  
-  gp_sum <- gp_day + gp_night
-  # If GP totals are missing/zero, fall back to proportional-to-hours partition
-  if (is.na(gp_sum) || gp_sum <= 0) {
-    frac_day <- day_h / (day_h + night_h)
-  } else {
-    frac_day <- gp_day / gp_sum
-  }
-  frac_night <- 1 - frac_day
-  
-  # Phase-specific net (umol C gDW^-1 per phase)
-  net_day_gdw   <- net_daily_gdw * frac_day
-  net_night_gdw <- net_daily_gdw * frac_night
-  
-  # Convert to hourly rates (umol C gDW^-1 h^-1)
-  u_day   <- net_day_gdw   / day_h
-  u_night <- net_night_gdw / night_h
-  
-  list(u_day = u_day, u_night = u_night, frac_day = frac_day, day_h = day_h, night_h = night_h)
-}
-
-#---------------------- Tea box forward model  ------------------------------
-# Assumptions: - No gas exchange, Well mixed, TA constant
-#              - DIC updated by u_net(t)*biomass/water_mass
-#---------------------- Tea box forward model  ------------------------------
-
-# Classify a timestamp as day or night based on clock hour. Used to switch 
-# between day and night carbon uptake rates during the incubation simulation.
-is_day_hour <- function(datetime) {
-  h <- lubridate::hour(datetime)
-  h >= 6 & h < 18
-}
-
-
-# Simulates the time evolution of DIC and pH in a well-mixed, fixed-mass water 
-# parcel exposed to kelp biomass for a specified duration, w above assumptions. 
-run_tea <- function(init_TA_umolkg,
-                    init_DIC_umolkg,
-                    S, T_C,
-                    water_mass_kg,
-                    kelp_biomass_gdw,
+#----- Tea box model -----
+# Simulates the time evolution of DIC and pH in a closed, well-mixed water parcel 
+# exposed to kelp at a given density (plants per kg water) for up to 24 h.
+# Assumptions: TA constant, no gas exchange or flushing
+# Starting ocean conditions are the "Outside" samples. Returns DIC (umol/kg) and pH at each step.
+run_tea <- function(init_TA_umolkg, init_DIC_umolkg, S, T_C,
+                    kelp_density_plants_kg,
                     exposure_hours,
-                    u_day_umolC_gdw_h,
-                    u_night_umolC_gdw_h,
-                    start_datetime) {
+                    u_day_umolC_plant_h, u_night_umolC_plant_h,
+                    start_datetime, day_hours,
+                    lon = -126.6,
+                    utc_offset = as.numeric(format(start_datetime, "%z")) / 100) {
   
   stopifnot(exposure_hours <= 24)
   
-  times_h <- c(0, seq(1, floor(exposure_hours), by = 1))
+  # Hourly steps, plus a final partial step if exposure is not a whole number of hours
+  times_h <- c(0, seq_len(floor(exposure_hours)))
   if (tail(times_h, 1) < exposure_hours) times_h <- c(times_h, exposure_hours)
   
-  DIC <- numeric(length(times_h))
-  pH  <- numeric(length(times_h))
+  # Daylight window: day_hours (from the DEB) centred on solar noon, in clock hours
+  noon <- 12 + (15 * utc_offset - lon) / 15
+  win  <- noon + c(-1, 1) * day_hours / 2
+  # Fraction of the clock interval [a, b] in daylight (shifts handle runs past midnight)
+  day_frac <- function(a, b) {
+    sum(sapply(c(-24, 0, 24), function(k)
+      max(0, min(b, win[2] + k) - max(a, win[1] + k)))) / (b - a)
+  }
+  start_clock <- lubridate::hour(start_datetime) + lubridate::minute(start_datetime) / 60
   
+  DIC <- numeric(length(times_h)); pH <- numeric(length(times_h))
   DIC[1] <- init_DIC_umolkg
   pH[1]  <- ph_from_ta_dic(init_TA_umolkg, DIC[1], S, T_C)
   
   for (i in 2:length(times_h)) {
     dt <- times_h[i] - times_h[i - 1]
-    now_dt <- start_datetime + hours(times_h[i - 1])
-    
-    u_net <- if (is_day_hour(now_dt)) u_day_umolC_gdw_h else u_night_umolC_gdw_h
-    
-    dDIC_umolkg <- -(u_net * kelp_biomass_gdw * dt) / water_mass_kg
-    DIC[i] <- DIC[i - 1] + dDIC_umolkg
+    # Weight day and night rates by the daylight fraction of this step
+    f <- day_frac(start_clock + times_h[i - 1], start_clock + times_h[i])
+    u <- f * u_day_umolC_plant_h + (1 - f) * u_night_umolC_plant_h   # umol C plant-1 h-1
+    # Per-plant drawdown scaled by plants per kg of water (negative u at night raises DIC)
+    DIC[i] <- DIC[i - 1] - u * kelp_density_plants_kg * dt           # umol kg-1
+    # TA is held constant, so pH follows from the new DIC
     pH[i]  <- ph_from_ta_dic(init_TA_umolkg, DIC[i], S, T_C)
   }
   
-  tibble(
-    t_h = times_h,
-    DateTime = start_datetime + hours(times_h),
-    TA_umolkg = init_TA_umolkg,
-    DIC_umolkg = DIC,
-    pH = pH
-  )
-}
-
-# Joins paired water samples to DEB day & env_daily day/night hrs. Select by DOY
-# pulled from water sample. DEB provides kelp carbon uptake rates and day/night 
-# photoperiod info to each sampling event.
-prepare_pairs_with_deb_env <- function(pairs_df,
-                                       kelp_df,
-                                       env_daily,
-                                       deb_doy_col = "real_DOY",
-                                       env_doy_col = "real_DOY") {
-  
-  pairs_df %>%
-    mutate(DOY = yday(Date)) %>%
-    left_join(kelp_df %>% mutate(DOY = .data[[deb_doy_col]]), by = "DOY") %>%
-    left_join(env_daily %>% mutate(DOY = .data[[env_doy_col]]) %>%
-                select(DOY, day_hours, night_hours),
-              by = "DOY")
+  tibble(t_h = times_h, DateTime = start_datetime + hours(times_h),
+         TA_umolkg = init_TA_umolkg, DIC_umolkg = DIC, pH = pH)
 }
 
 
 # --------------------- landscape simulations ------------------------
-
-# Runs the kelp-tea box model across a Cartesian grid of water mass, kelp biomass, 
-# and exposure time for each valid Site × Date pairing, returning modeled pH changes, 
-# DIC changes, and diagnostics while capturing and reporting failures for debugging.
-simulate_landscape <- function(pairs_df,
-                               kelp_df,
-                               env_daily,
-                               water_mass_kg_vec,
-                               kelp_biomass_gdw_vec,
-                               exposure_hours_vec,
-                               verbose = TRUE) {
-  
-  msg <- function(...) if (isTRUE(verbose)) message(...)
-  
-  # ---- 1) Join paired water to DEB + env ----
-  msg("[1/6] Joining paired water samples to DEB + env_daily ...")
-  pairs2 <- prepare_pairs_with_deb_env(pairs_df, kelp_df, env_daily)
-  
-  # ---- 2) Guard rails + basic validity filtering (drop rows that will break) ----
-  msg("[2/6] Applying guard rails & dropping invalid rows ...")
-  n0 <- nrow(pairs2)
-  
-  pairs2 <- pairs2 %>%
-    mutate(
-      gp_sum    = GP_day_umolC + GP_night_umolC,
-      hours_sum = day_hours + night_hours
-    ) %>%
-    filter(
-      # Required to run tea + carbonate calc
-      !is.na(TA_Out), !is.na(DIC_Out),
-      !is.na(Salt_Out), !is.na(Temp_Out),
-      !is.na(DateTime_Out),
-      !is.na(pH_Out), !is.na(pH_In),
-      !is.na(DIC_In),
-      
-      # Required for DEB partition
-      !is.na(net_daily_gDW),
-      !is.na(day_hours), !is.na(night_hours),
-      hours_sum > 0, day_hours > 0, night_hours > 0,
-      
-      # We'll allow gp_sum <= 0 (falls back to hours partition),
-      # but we do NOT allow gp_sum = NA because it can propagate NAs in seacarb checks.
-      !is.na(gp_sum)
-    ) %>%
-    select(-gp_sum, -hours_sum)
-  
-  msg("  Kept ", nrow(pairs2), " / ", n0, " paired events after filtering (dropped ", n0 - nrow(pairs2), ").")
-  
-  if (nrow(pairs2) == 0) stop("No valid paired events after join + guard rails.")
-  
-  # ---- 3) Expand grid of experimental treatments ----
-  msg("[3/6] Expanding parameter grid (water_mass × kelp_biomass × exposure_hours) ...")
-  grid <- tidyr::expand_grid(
-    Site = unique(pairs2$Site),
-    Date = unique(pairs2$Date),
-    water_mass_kg = water_mass_kg_vec,
-    kelp_biomass_gdw = kelp_biomass_gdw_vec,
-    exposure_hours = exposure_hours_vec
-  ) %>%
-    left_join(pairs2, by = c("Site", "Date"))
-  
-  msg("  Grid rows: ", nrow(grid))
-  
-  # ---- 4) Compute u_day/u_night *outside* the big mutate, as an intermediate table ----
-  msg("[4/6] Computing u_day/u_night from DEB net_daily_gDW + GP ratios ...")
-  
-  # Identify rows that still have missing required fields after join to grid
-  req <- c("net_daily_gDW","GP_day_umolC","GP_night_umolC","day_hours","night_hours",
-           "TA_Out","DIC_Out","Salt_Out","Temp_Out","DateTime_Out","pH_Out","pH_In","DIC_In")
-  missing_req <- grid %>%
-    mutate(.row_id = row_number()) %>%
-    filter(if_any(all_of(req), is.na)) %>%
-    select(.row_id, Site, Date, any_of(req))
-  
-  if (nrow(missing_req) > 0) {
-    msg("  NOTE: ", nrow(missing_req), " grid rows have missing required inputs (will be dropped).")
-  }
-  
-  grid_ok <- grid %>%
-    mutate(.row_id = row_number()) %>%
-    filter(!if_any(all_of(req), is.na))
-  
-  msg("  Rows with complete inputs: ", nrow(grid_ok), " / ", nrow(grid))
-  
-  # Compute rates row-by-row, but store them in a clean intermediate
-  rates_tbl <- grid_ok %>%
-    rowwise() %>%
-    mutate(
-      .rates = list(compute_unet_day_night_from_deb(cur_data())),
-      u_day   = .rates$u_day,
-      u_night = .rates$u_night,
-      frac_day = .rates$frac_day,
-      day_h   = .rates$day_h,
-      night_h = .rates$night_h
-    ) %>%
-    ungroup() %>%
-    select(.row_id, u_day, u_night, frac_day, day_h, night_h)
-  
-  # Join rates back
-  grid_ok <- grid_ok %>%
-    left_join(rates_tbl, by = ".row_id")
-  
-  # ---- 5) Run tea in a controlled loop with progress messages & per-row error trapping ----
-  msg("[5/6] Running tea simulations row-by-row (with error capture) ...")
-  
-  n_sim <- nrow(grid_ok)
-  if (n_sim == 0) stop("No simulations to run after filtering.")
-  
-  # Preallocate result list (faster + easier to debug)
-  out_list <- vector("list", n_sim)
-  
-  for (i in seq_len(n_sim)) {
-    
-    if (verbose && (i %% 250 == 0 || i == 1 || i == n_sim)) {
-      msg("  Tea run ", i, " / ", n_sim)
-    }
-    
-    r <- grid_ok[i, ]
-    
-    # Extra debug guard: seacarb sometimes errors if S/T are NA or out-of-range
-    # Your error indicates a missing value in a logical check (often NA T or S).
-    if (is.na(r$Temp_Out) || is.na(r$Salt_Out)) {
-      out_list[[i]] <- tibble(.row_id = r$.row_id, ok = FALSE,
-                              err = "Temp_Out or Salt_Out is NA (should have been filtered).")
-      next
-    }
-    
-    # Run tea with tryCatch so you can inspect failures instead of crashing
-    tea_res <- tryCatch(
-      run_tea(
-        init_TA_umolkg   = r$TA_Out,
-        init_DIC_umolkg  = r$DIC_Out,
-        S = r$Salt_Out, T_C = r$Temp_Out,
-        water_mass_kg = r$water_mass_kg,
-        kelp_biomass_gdw = r$kelp_biomass_gdw,
-        exposure_hours = r$exposure_hours,
-        u_day_umolC_gdw_h = r$u_day,
-        u_night_umolC_gdw_h = r$u_night,
-        start_datetime = r$DateTime_Out
-      ),
-      error = function(e) e
-    )
-    
-    if (inherits(tea_res, "error")) {
-      out_list[[i]] <- tibble(
-        .row_id = r$.row_id,
-        ok = FALSE,
-        err = conditionMessage(tea_res)
-      )
-      next
-    }
-    
-    # Successful run: compute endpoints
-    pH_end  <- tea_res$pH[nrow(tea_res)]
-    DIC_end <- tea_res$DIC_umolkg[nrow(tea_res)]
-    
-    out_list[[i]] <- tibble(
-      .row_id = r$.row_id,
-      ok = TRUE,
-      pH_end = pH_end,
-      DIC_end = DIC_end,
-      dpH_end = pH_end - r$pH_Out,
-      dpH_needed = r$pH_In - r$pH_Out,
-      dDIC_removed = r$DIC_Out - DIC_end,
-      dDIC_needed  = r$DIC_Out - r$DIC_In
-    )
-  }
-  
-  res_tbl <- bind_rows(out_list)
-  
-  # ---- 6) Assemble final output tables ----
-  msg("[6/6] Assembling outputs ...")
-  
-  # Attach results back to grid_ok (successful + failed)
-  sim_out <- grid_ok %>%
-    left_join(res_tbl, by = ".row_id")
-  
-  # A clean table of failures for debugging
-  failures <- sim_out %>%
-    filter(!ok) %>%
-    select(.row_id, Site, Date, water_mass_kg, kelp_biomass_gdw, exposure_hours,
-           Temp_Out, Salt_Out, TA_Out, DIC_Out, pH_Out,
-           net_daily_gDW, GP_day_umolC, GP_night_umolC, day_hours, night_hours,
-           u_day, u_night,
-           any_of("err") )  #any_of() added to fix a select error as 'err' may not propagate
-  
-  if (nrow(failures) > 0) {
-    msg("  WARN: ", nrow(failures), " simulations failed. Inspect the returned `$failures` table.")
-  } else {
-    msg("  All simulations succeeded.")
-  }
-  
-  # Keep only successful sims in the main output (typical use),
-  # but return both so you can debug.
-  sims <- sim_out %>%
-    filter(ok) %>%
-    select(Site, Date, DOY,
-           water_mass_kg, kelp_biomass_gdw, exposure_hours,
-           TA_Out, DIC_Out, pH_Out, DIC_In, pH_In,
-           dpH_needed, pH_end, dpH_end,
-           dDIC_needed, dDIC_removed,
-           net_daily_gDW, frac_day, day_h, night_h, u_day, u_night)
-  
-  list(
-    sims = sims,
-    failures = failures,
-    grid_ok = grid_ok,
-    missing_required = missing_req
-  )
-}
-
-# As above, but working with kelp density
-# Feb 16: Currently using this version. 
-simulate_dens_landscape <- function(pairs_df,
-                                    kelp_df,
-                                    env_daily,
-                                    kelp_density_gdwkg_vec,     # <-- NEW: gDW / kg
+# Runs the kelp-tea box model across a Cartesian grid of kelp densities 
+# (kelp biomass per water mass) and exposure times for each valid Site × Date pairing.
+# Returns modeled pH and DIC changes, along with diagnostics for debugging,
+# including: successful runs ($sims), failed runs ($failures), and every 
+# attempted run with inputs ($grid_ok).
+simulate_dens_landscape <- function(pairs_df, kelp_df, env_daily,
+                                    kelp_density_plants_m2_vec,
                                     exposure_hours_vec,
-                                    water_mass_kg = 1,          # keep fixed (or pass a vector if you want)
+                                    box_area_m2  = 1,
+                                    box_depth_m  = 10,
+                                    seawater_kg_m3 = 1025,
                                     verbose = TRUE) {
   
   msg <- function(...) if (isTRUE(verbose)) message(...)
   
-  # ---- 1) Join paired water samples to DEB + env ----
-  msg("[1/6] Joining paired water samples to DEB + env_daily ...")
-  pairs2 <- prepare_pairs_with_deb_env(pairs_df, kelp_df, env_daily)
+  # ---- 1) Join pairs to DEB fluxes and photoperiod (pairs outside the DEB run are dropped) ----
+  msg("[1/4] Joining paired water samples to DEB + env_daily ...")
+  pairs2 <- merge_pairs_with_deb_days(pairs_df, kelp_df, env_daily)
   
-  # ---- 2) Guard rails + validity filtering ----
-  msg("[2/6] Applying guard rails & dropping invalid rows ...")
+  req <- c("TA_Out", "DIC_Out", "Salinity_Out", "Temp_Out", "DateTime_Out",
+           "pH_Out", "pH_In", "DIC_In",
+           "GP_day_umolC", "GP_night_umolC", "R_prod_umolC", "R_maint_umolC",
+           "day_hours", "night_hours")
   n0 <- nrow(pairs2)
-  
   pairs2 <- pairs2 %>%
+    filter(!if_any(all_of(req), is.na), day_hours > 0, night_hours > 0)
+  msg("  Kept ", nrow(pairs2), " / ", n0, " paired events with complete inputs.")
+  if (nrow(pairs2) == 0) stop("No valid paired events after join + filtering.")
+  
+  # ---- 2) Build grid (paired Site x Date x kelp density x exposure time) ----
+  # With one row per simulation containing water chemistry, DEB fluxes, 
+  # photo-period and per-plant uptake rates passed to run_tea(). The version 
+  # returned by run_tea() has the results attached (pH_end, DIC_end, dpH_end, ok/err).
+  msg("[2/4] Building grid (pairs x density x exposure) and per-plant uptake rates ...")
+  
+  water_mass_kg <- box_area_m2 * box_depth_m * seawater_kg_m3   # 10,250 kg for the default box
+  grid_ok <- pairs2 %>%
+    tidyr::crossing(kelp_density_plants_m2 = kelp_density_plants_m2_vec,
+                    exposure_hours     = exposure_hours_vec) %>%
     mutate(
-      gp_sum    = GP_day_umolC + GP_night_umolC,
-      hours_sum = day_hours + night_hours
-    ) %>%
-    filter(
-      # Required to run tea + carbonate calc
-      !is.na(TA_Out), !is.na(DIC_Out),
-      !is.na(Salt_Out), !is.na(Temp_Out),
-      !is.na(DateTime_Out),
-      !is.na(pH_Out), !is.na(pH_In),
-      !is.na(DIC_In),
+      .row_id = row_number(),
+      kelp_density_plants_kg = kelp_density_plants_m2 * box_area_m2 / water_mass_kg,
       
-      # Required for DEB partition
-      !is.na(net_daily_gDW),
-      !is.na(day_hours), !is.na(night_hours),
-      hours_sum > 0, day_hours > 0, night_hours > 0,
-      
-      # Allow gp_sum <= 0 (fallback to hours), but don't allow NA
-      !is.na(gp_sum)
-    ) %>%
-    select(-gp_sum, -hours_sum)
-  
-  msg("  Kept ", nrow(pairs2), " / ", n0, " paired events after filtering (dropped ", n0 - nrow(pairs2), ").")
-  if (nrow(pairs2) == 0) stop("No valid paired events after join + guard rails.")
-  
-  # ---- 3) Expand grid in density space ----
-  msg("[3/6] Expanding parameter grid (density × exposure × water_mass) ...")
-  
-  # allow water_mass_kg to be scalar or vector
-  water_mass_kg_vec <- water_mass_kg
-  
-  grid <- tidyr::expand_grid(
-    Site = unique(pairs2$Site),
-    Date = unique(pairs2$Date),
-    water_mass_kg = water_mass_kg_vec,
-    kelp_density_gdwkg = kelp_density_gdwkg_vec,
-    exposure_hours = exposure_hours_vec
-  ) %>%
-    left_join(pairs2, by = c("Site", "Date")) %>%
-    mutate(
-      kelp_biomass_gdw = kelp_density_gdwkg * water_mass_kg
+      # DIC drawdown = GP - respiration; DOC counts as removed. Production respiration is
+      # daytime only; maintenance respiration is split by hours of day and night.
+      maint_day   = R_maint_umolC * day_hours / (day_hours + night_hours),
+      maint_night = R_maint_umolC - maint_day,
+      u_day       = (GP_day_umolC - R_prod_umolC - maint_day) / day_hours,     # umol C plant-1 h-1
+      u_night     = (GP_night_umolC - maint_night) / night_hours
     )
+  msg("  Simulations to run: ", nrow(grid_ok))
   
-  msg("  Grid rows: ", nrow(grid))
-  
-  # ---- 4) Compute u_day/u_night as an intermediate table ----
-  msg("[4/6] Computing u_day/u_night from DEB net_daily_gDW + GP ratios + env photoperiod ...")
-  
-  req <- c("net_daily_gDW","GP_day_umolC","GP_night_umolC","day_hours","night_hours",
-           "TA_Out","DIC_Out","Salt_Out","Temp_Out","DateTime_Out","pH_Out","pH_In","DIC_In",
-           "kelp_density_gdwkg","water_mass_kg","kelp_biomass_gdw","exposure_hours")
-  
-  missing_req <- grid %>%
-    mutate(.row_id = row_number()) %>%
-    filter(if_any(all_of(req), is.na)) %>%
-    select(.row_id, Site, Date, any_of(req))
-  
-  if (nrow(missing_req) > 0) {
-    msg("  NOTE: ", nrow(missing_req), " grid rows have missing required inputs (will be dropped).")
-  }
-  
-  grid_ok <- grid %>%
-    mutate(.row_id = row_number()) %>%
-    filter(!if_any(all_of(req), is.na))
-  
-  msg("  Rows with complete inputs: ", nrow(grid_ok), " / ", nrow(grid))
-  if (nrow(grid_ok) == 0) stop("No simulations to run after filtering missing inputs.")
-  
-  rates_tbl <- grid_ok %>%
-    rowwise() %>%
-    mutate(
-      .rates = list(compute_unet_day_night_from_deb(cur_data())),
-      u_day   = .rates$u_day,
-      u_night = .rates$u_night,
-      frac_day = .rates$frac_day,
-      day_h   = .rates$day_h,
-      night_h = .rates$night_h
-    ) %>%
-    ungroup() %>%
-    select(.row_id, u_day, u_night, frac_day, day_h, night_h)
-  
-  grid_ok <- grid_ok %>%
-    left_join(rates_tbl, by = ".row_id")
-  
-  # ---- 5) Run tea simulations row-by-row with error capture ----
-  msg("[5/6] Running tea simulations row-by-row (with error capture) ...")
-  
+  # ---- 3) Run the tea box for each row, capturing errors ----
+  msg("[3/4] Running tea simulations ...")
   n_sim <- nrow(grid_ok)
   out_list <- vector("list", n_sim)
   
   for (i in seq_len(n_sim)) {
-    
-    if (verbose && (i %% 250 == 0 || i == 1 || i == n_sim)) {
-      msg("  Tea run ", i, " / ", n_sim)
-    }
-    
+    if (verbose && (i == 1 || i %% 250 == 0 || i == n_sim)) msg("  Tea run ", i, " / ", n_sim)
     r <- grid_ok[i, ]
     
     tea_res <- tryCatch(
-      run_tea(
-        init_TA_umolkg   = r$TA_Out,
-        init_DIC_umolkg  = r$DIC_Out,
-        S = r$Salt_Out, T_C = r$Temp_Out,
-        water_mass_kg = r$water_mass_kg,
-        kelp_biomass_gdw = r$kelp_biomass_gdw,
-        exposure_hours = r$exposure_hours,
-        u_day_umolC_gdw_h = r$u_day,
-        u_night_umolC_gdw_h = r$u_night,
-        start_datetime = r$DateTime_Out
-      ),
-      error = function(e) e
-    )
+      run_tea(init_TA_umolkg = r$TA_Out, init_DIC_umolkg = r$DIC_Out,
+              S = r$Salinity_Out, T_C = r$Temp_Out,
+              kelp_density_plants_kg = r$kelp_density_plants_kg,
+              exposure_hours = r$exposure_hours,
+              u_day_umolC_plant_h = r$u_day, u_night_umolC_plant_h = r$u_night,
+              start_datetime = r$DateTime_Out, day_hours = r$day_hours),
+      error = function(e) e)
     
     if (inherits(tea_res, "error")) {
-      out_list[[i]] <- tibble(
-        .row_id = r$.row_id,
-        ok = FALSE,
-        err = conditionMessage(tea_res)
-      )
+      out_list[[i]] <- tibble(.row_id = r$.row_id, ok = FALSE, err = conditionMessage(tea_res))
       next
     }
-    
     pH_end  <- tea_res$pH[nrow(tea_res)]
     DIC_end <- tea_res$DIC_umolkg[nrow(tea_res)]
-    
     out_list[[i]] <- tibble(
-      .row_id = r$.row_id,
-      ok = TRUE,
-      err = NA_character_,
-      pH_end = pH_end,
-      DIC_end = DIC_end,
-      dpH_end = pH_end - r$pH_Out,
-      dpH_needed = r$pH_In - r$pH_Out,
-      dDIC_removed = r$DIC_Out - DIC_end,
-      dDIC_needed  = r$DIC_Out - r$DIC_In
+      .row_id = r$.row_id, ok = TRUE, err = NA_character_,
+      pH_end = pH_end, DIC_end = DIC_end,
+      dpH_end = pH_end - r$pH_Out,       dpH_needed  = r$pH_In - r$pH_Out,
+      dDIC_removed = r$DIC_Out - DIC_end, dDIC_needed = r$DIC_Out - r$DIC_In
     )
   }
   
-  res_tbl <- bind_rows(out_list)
+  # ---- 4) Assemble outputs ----
+  msg("[4/4] Assembling outputs ...")
+  sim_out <- grid_ok %>% left_join(bind_rows(out_list), by = ".row_id")
   
-  # ---- 6) Assemble outputs ----
-  msg("[6/6] Assembling outputs ...")
+  failures <- sim_out %>% filter(!ok) %>%
+    select(.row_id, Site, Date, kelp_density_plants_m2, exposure_hours,
+           Temp_Out, Salinity_Out, TA_Out, DIC_Out, u_day, u_night, err)
+  msg(if (nrow(failures) > 0) paste0("  WARN: ", nrow(failures), " simulations failed; see $failures.")
+      else "  All simulations succeeded.")
   
-  sim_out <- grid_ok %>%
-    left_join(res_tbl, by = ".row_id")
-  
-  failures <- sim_out %>%
-    filter(!ok) %>%
-    select(.row_id, Site, Date,
-           water_mass_kg, kelp_density_gdwkg, kelp_biomass_gdw, exposure_hours,
-           Temp_Out, Salt_Out, TA_Out, DIC_Out, pH_Out,
-           net_daily_gDW, GP_day_umolC, GP_night_umolC, day_hours, night_hours,
-           u_day, u_night,
-           err)
-  
-  if (nrow(failures) > 0) {
-    msg("  WARN: ", nrow(failures), " simulations failed. Inspect `$failures`.")
-  } else {
-    msg("  All simulations succeeded.")
-  }
-  
-  sims <- sim_out %>%
-    filter(ok) %>%
-    select(Site, Date, DOY,
-           water_mass_kg, kelp_density_gdwkg, kelp_biomass_gdw, exposure_hours,
+  sims <- sim_out %>% filter(ok) %>%
+    select(Site, Date, DOY, kelp_density_plants_m2, exposure_hours,
            TA_Out, DIC_Out, pH_Out, DIC_In, pH_In,
-           dpH_needed, pH_end, dpH_end,
-           dDIC_needed, dDIC_removed,
-           net_daily_gDW, frac_day, day_h, night_h, u_day, u_night)
+           dpH_needed, pH_end, dpH_end, dDIC_needed, dDIC_removed,
+           day_hours, night_hours, u_day, u_night)
   
-  list(
-    sims = sims,
-    failures = failures,
-    grid_ok = grid_ok,
-    missing_required = missing_req
-  )
+  list(sims = sims, failures = failures, grid_ok = sim_out)
 }
-
 
 make_dpH_df <- function(sim_out) {
   
@@ -1109,7 +719,6 @@ make_dpH_df <- function(sim_out) {
       match_error
     )
 }
-
 
 make_dpH_summary_df <- function(sim_out) {
   
@@ -1136,7 +745,6 @@ make_dpH_summary_df <- function(sim_out) {
       exposure_hours
     )
 }
-
 
 # Time ends of a data distribution. For removing outliers
 filter_outliers <- function(df, max_abs) {
@@ -1250,8 +858,8 @@ make_interp_surface <- function(sims, site_pick, date_pick, z = "dpH_end",
   # Filter + prep (interpolate in log-density space to preserve resolution at low rho)
   df <- sims %>%
     dplyr::filter(Site == site_pick, Date == as.Date(date_pick)) %>%
-    dplyr::filter(is.finite(kelp_density_gdwkg), kelp_density_gdwkg > 0) %>%
-    dplyr::mutate(log10_rho = log10(kelp_density_gdwkg)) %>%
+    dplyr::filter(is.finite(kelp_density_plants_m2), kelp_density_plants_m2 > 0) %>%
+    dplyr::mutate(log10_rho = log10(kelp_density_plants_m2)) %>%
     dplyr::select(exposure_hours, log10_rho, dplyr::all_of(z)) %>%
     dplyr::distinct() %>%
     tidyr::drop_na()
@@ -1276,7 +884,7 @@ make_interp_surface <- function(sims, site_pick, date_pick, z = "dpH_end",
   )
   
   surf[[z]] <- as.vector(itp$z)
-  surf$kelp_density_gdwkg <- 10^(surf$log10_rho)
+  surf$kelp_density_plants_m2 <- 10^(surf$log10_rho)
   
   tibble::as_tibble(surf)
 }
@@ -1304,7 +912,7 @@ plot_interp_density_exposure_dpH <- function(surf,
                                              log10_density = TRUE) {
   
   # Required columns
-  req <- c("exposure_hours", "kelp_density_gdwkg", z_col)
+  req <- c("exposure_hours", "kelp_density_plants_m2", z_col)
   missing <- setdiff(req, names(surf))
   if (length(missing) > 0) {
     stop("`surf` is missing required columns: ", paste(missing, collapse = ", "))
@@ -1319,8 +927,8 @@ plot_interp_density_exposure_dpH <- function(surf,
   surf2 <- surf %>%
     dplyr::filter(is.finite(.data[[z_col]]),
                   is.finite(exposure_hours),
-                  is.finite(kelp_density_gdwkg),
-                  kelp_density_gdwkg > 0)
+                  is.finite(kelp_density_plants_m2),
+                  kelp_density_plants_m2 > 0)
   
   if (nrow(surf2) == 0) stop("No finite values in `surf` after filtering.")
   
@@ -1345,7 +953,7 @@ plot_interp_density_exposure_dpH <- function(surf,
     surf2,
     ggplot2::aes(
       x = exposure_hours,
-      y = kelp_density_gdwkg,
+      y = kelp_density_plants_m2,
       fill = .data[[z_col]]
     )
   ) +
@@ -1359,7 +967,7 @@ plot_interp_density_exposure_dpH <- function(surf,
       title = title_txt,
       subtitle = paste0("Dashed = observed ΔpH (In − Out) = ", signif(dpH_obs, 3)),
       x = "Exposure time (h)",
-      y = expression("Kelp density (g DW kg"^-1*")")
+      y = expression("Kelp density (plants m"^-2*")")
     ) +
     ggplot2::theme_classic()
   
@@ -1368,7 +976,7 @@ plot_interp_density_exposure_dpH <- function(surf,
       ggplot2::geom_contour(
         aes(
           x = exposure_hours,
-          y = kelp_density_gdwkg,
+          y = kelp_density_plants_m2,
           z = .data[[z_col]]
         ),
         breaks = dpH_obs,
@@ -1428,7 +1036,7 @@ plot_interp_density_exposure_by_date <- function(sims,
     surf_all,
     ggplot2::aes(
       x = exposure_hours,
-      y = kelp_density_gdwkg,
+      y = kelp_density_plants_m2,
       fill = .data[[z_col]]
     )
   ) +
@@ -1446,7 +1054,7 @@ plot_interp_density_exposure_by_date <- function(sims,
       ),
       subtitle = "Dashed line = observed ΔpH (In − Out)",
       x = "Exposure time (h)",
-      y = expression("Kelp density (g DW kg"^-1*")")
+      y = expression("Kelp density (plants m"^-2*")")
     ) +
     ggplot2::theme_classic()
   
@@ -1471,7 +1079,7 @@ plot_interp_density_exposure_by_date <- function(sims,
         inherit.aes = FALSE,
         ggplot2::aes(
           x = exposure_hours,
-          y = kelp_density_gdwkg,
+          y = kelp_density_plants_m2,
           z = .data[[z_col]]
         ),
         breaks = dpH_d,
@@ -1484,7 +1092,7 @@ plot_interp_density_exposure_by_date <- function(sims,
   p
 }
 
-# Diagnostic plot produces table of available contours from descrete samples ----
+# Diagnostic plot produces table of available contours from discrete samples ----
 summarise_contour_availability <- function(sims,
                                            site_pick,
                                            nx = 200,
@@ -1569,7 +1177,7 @@ plot_density_exposure_dpH <- function(sims,
     df,
     aes(
       x = exposure_hours,
-      y = kelp_density_gdwkg,
+      y = kelp_density_plants_m2,
       fill = dpH_end
     )
   ) +
@@ -1596,7 +1204,7 @@ plot_density_exposure_dpH <- function(sims,
         "Site: ", site_pick, " | Date: ", date_pick
       ),
       x = "Exposure time (h)",
-      y = expression("Kelp density (g DW kg"^-1*")")
+      y = expression("Kelp density (plants m"^-2*")")
     ) +
     theme_classic()
   
@@ -1649,7 +1257,7 @@ build_interp_grid_data <- function(sims,
     surf_list[[i]] <- surf %>%
       dplyr::mutate(
         Site = s,
-        Date = as.Date(d),
+        Date = as.Date(d, tz="America/Vancouver"),
         dpH_obs = dpH_obs
       )
   }
@@ -1688,7 +1296,7 @@ plot_interp_grid_sites_dates <- function(surfaces,
                                          z_col = "dpH_end",
                                          log10_density = TRUE) {
   
-  req <- c("Site", "Date", "exposure_hours", "kelp_density_gdwkg", "dpH_obs", z_col)
+  req <- c("Site", "Date", "exposure_hours", "kelp_density_plants_m2", "dpH_obs", z_col)
   miss <- setdiff(req, names(surfaces))
   if (length(miss) > 0) stop("`surf_all` missing: ", paste(miss, collapse = ", "))
   
@@ -1704,7 +1312,7 @@ plot_interp_grid_sites_dates <- function(surfaces,
     surfaces,
     ggplot2::aes(
       x = exposure_hours,
-      y = kelp_density_gdwkg,
+      y = kelp_density_plants_m2,
       fill = .data[[z_col]]
     )
   ) +
@@ -1719,7 +1327,7 @@ plot_interp_grid_sites_dates <- function(surfaces,
       title = "Interpolated kelp-driven pH response surface",
       subtitle = "Dashed contour = observed ΔpH (In − Out) for that Site × Date",
       x = "Exposure time (h)",
-      y = expression("Kelp density (g DW kg"^-1*")")
+      y = expression("Kelp density (plants m"^-2*")")
     ) +
     ggplot2::theme_classic() +
     ggplot2::theme(
@@ -1747,8 +1355,8 @@ plot_interp_grid_sites_dates <- function(surfaces,
     s_df <- surfaces %>%
       dplyr::filter(Site == s, Date == d) %>%
       dplyr::filter(is.finite(.data[[z_col]]),
-                    is.finite(kelp_density_gdwkg),
-                    kelp_density_gdwkg > 0,
+                    is.finite(kelp_density_plants_m2),
+                    kelp_density_plants_m2 > 0,
                     is.finite(exposure_hours))
     
     if (nrow(s_df) == 0 || !is.finite(dpH)) next
@@ -1764,7 +1372,7 @@ plot_interp_grid_sites_dates <- function(surfaces,
         inherit.aes = FALSE,
         ggplot2::aes(
           x = exposure_hours,
-          y = kelp_density_gdwkg,
+          y = kelp_density_plants_m2,
           z = .data[[z_col]]
         ),
         breaks = dpH,
