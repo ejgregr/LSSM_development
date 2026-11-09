@@ -30,17 +30,14 @@ setwd( "c:/Data/Git/LSSM_development")
 source( "LSSM_config2.R" )
 
 #=== LOAD Observational data ===
-# LOAD 2025 observational data, including PAR/DLI estimates.
-# LAST time RData created = 2026/01/13 by the LSSM_Water_analysis.proj
-input_path <- file.path(source_dir, "kelp_project_data_2026_10_19.RData" )
-#input_path <- file.path(DEB_dir, "kelp_project_data_2026_01_13.RData" )
+# LOAD latest 2025 observational results data, including PAR/DLI estimates.
+input_path <- file.path(results_dir, "kelp_project_data_2026_11_09.RData" )
 load(input_path)
 
 # Minor data corrections to push back to data loading script ... 
 # NB: Root of problem is that as.Date() assumes UTC for POSIX instead of checking tz.
 PAR_df$DateTime <- as.POSIXct(PAR_df$DateTime, format = "%Y-%m-%d %H:%M:%S", tz = "America/Vancouver")
 attr(PAR_df$DateTime, "tzone")
-
 
 # Set temporal window to match moorings ... 
 start_date <- "2025-04-25 00:00:00 PDT"
@@ -123,6 +120,15 @@ with(kelp_df, c(R_total_over_GP = sum(R_prod_umolC + R_maint_umolC) / sum(GP_umo
 source( "LSSM_chemistry2.R" )
 
 
+
+str( kelp_df )
+str( chem_data )
+str( disc_data )
+str( pairs )
+
+
+
+
 #---- This bit of code makes the facet plot, for those NOT filtered out. 
 dpH_df <- make_dpH_summary_df( sim_out )
 
@@ -165,14 +171,14 @@ ggplot(df_hm, aes(x = Site, y = Date_f, fill = match_error)) +
 
 #---- This plots the BIG plot of tea landscape with paired samples -------
 
-# Interpolate all the surfaces from the simulation ...
+#---- Prepare the data for plotting by interpolating all the surfaces from the simulation
 surf_all <- build_interp_grid_data(sim_out$sims, nx = 200, ny = 200, z_col = "dpH_end")
 
 # Find all available contours ... 
 # This assumes a global variable 
 contour_ok <- summarise_contour_availability_all_sites(sim_out$sims, nx = 200, ny = 200, z_col = "dpH_end")
 
-# Filter out the surfaces with no contour ... 
+# Filter out the surfaces with no contour. These have a dpH value that 
 # NOTE: 
 surf_all_ok <- surf_all %>%
   dplyr::inner_join(
@@ -182,19 +188,12 @@ surf_all_ok <- surf_all %>%
     by = c("Site", "Date")
   )
 
-# Create label positions for dpH values ...
-label_df <- surf_all_ok %>%
-  dplyr::group_by(Site, Date) %>%
-  dplyr::summarise(
-    dpH_obs = dpH_obs[1],
-    x_lab = min(exposure_hours, na.rm = TRUE),
-    y_lab = max(kelp_density_plants_m2, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-
 # Plot only those with contours ... 
-bigP <- plot_interp_grid_sites_dates(surf_all_ok, z_col = "dpH_end", log10_density = TRUE)
+bigP <- plot_interp_grid_sites_dates(surf_all_ok, z_col = "dpH_end", log10_density = TRUE )
+
+
+
+
 
 #--- PLOT all incubations ... 
 #bigP <- plot_interp_grid_sites_dates(surf_all, z_col = "dpH_end", log10_density = TRUE)

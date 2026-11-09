@@ -40,7 +40,7 @@ bc_time <- 'America/Vancouver'
 
 data_dir <- "C:/Data/Git/LSSM_prototype/Data"
 PDF_dir  <- "C:/Data/Git/LSSM_prototype/PDF" # for Markdown script
-source_dir <- "C:/Data/Git/LSSM_water_analysis/Results"
+results_dir <- "C:/Data/Git/LSSM_water_analysis/Results"
 
 
 #-------------------- SUPPORT FUNCTIONS ----------------------------------
@@ -488,20 +488,45 @@ get_daylight_hours <- function( par ) {
 }
 
 
+
 # ----------------- Carbonate chemistry Utilities -----------------------
 # A wrapper to filter incomplete rows and append DIC to the full discrete 
 # water dataset without aggregating by site or condition.
-# Adds total alkalinity (TA) and DIC, both in umol/kg, calculated from pCO2 and pH.
-add_DIC_Alk <- function(df) {
-  ok <- complete.cases(df[, c("Temp", "Salinity", "pCO2", "pH")])
+# Adds DIC and total alkalinity (TA) (both in umol/kg). pCO2 in uAtm.
+add_DIC_Alk <- function( df ) {
+  ok <- complete.cases(df[, c("T_lab", "S_lab", "pCO2_lab", "pH_lab")])
   if (any(!ok)) message("Dropped ", sum(!ok), " rows with missing T, S, pCO2 or pH.")
   df <- df[ok, ]
   
-  res <- seacarb::carb(flag = 21, var1 = df$pCO2, var2 = df$pH,   # pCO2 (uatm), pH (total)
-                       S = df$Salinity, T = df$Temp, Patm = 1, P = 1, Pt = 0, Sit = 0)
-  df$TA  <- res$ALK * 1e6    # seacarb returns mol/kg
+  res <- seacarb::carb(flag = 21, var1 = df$pCO2_lab, var2 = df$pH_lab,   # pCO2 (uatm), pH (total)
+                       S = df$S_lab, 
+                       T = df$T_lab, 
+                       Patm = 1, 
+                       P = 1, 
+                       Pt = 0, 
+                       Sit = 0, 
+                       k1k2 = "w14" )
+
+  # seacarb result (mol/kg) to umol/kg
+  df$TA  <- res$ALK * 1e6    
   df$DIC <- res$DIC * 1e6
   df
+}
+
+# Computes pH from total alkalinity and DIC (holding TA constant) using seacarb::carb().
+# Translates modelled DIC changes into pH responses.
+ph_from_ta_dic <- function(TA_umolkg, DIC_umolkg, S, T_C, P_dbar = 1) {
+  # TA + DIC -> pH : flag confirmed.
+  res <- seacarb::carb( flag = 15, var1 = TA_umolkg / 1e6, var2 = DIC_umolkg /1e6, 
+    S    = S,
+    T    = T_C,
+    Patm = 1,
+    P    = P_dbar,
+    Pt   = 0,
+    Sit  = 0,
+    k1k2 = "w14"
+  )
+  res$pH
 }
 
 # TA vs salinity: scatter, linear fit with 95% CI band, and residuals vs salinity.
@@ -530,39 +555,25 @@ fit_TA_salinity <- function(df) {
   invisible(m)
 }
 
-# Computes pH from total alkalinity and DIC (holding TA constant) using seacarb::carb().
-# Translates modelled DIC changes into pH responses.
-ph_from_ta_dic <- function(TA_umolkg, DIC_umolkg, S, T_C, P_dbar = 1) {
-  # You confirmed this flag is correct in your setup.
-  res <- seacarb::carb(
-    flag = 15,            # TA + DIC -> pH (per your confirmation)
-    var1 = TA_umolkg / 1e6,
-    var2 = DIC_umolkg /1e6,
-    S    = S,
-    T    = T_C,
-    Patm = 1,
-    P    = P_dbar,
-    Pt   = 0,
-    Sit  = 0
-  )
-  res$pH
-}
-
 
 #----- Tea box model -----
 # Simulates the time evolution of DIC and pH in a closed, well-mixed water parcel 
 # exposed to kelp at a given density (plants per kg water) for up to 24 h.
 # Assumptions: TA constant, no gas exchange or flushing
 # Starting ocean conditions are the "Outside" samples. Returns DIC (umol/kg) and pH at each step.
+# 26/11: Steep time now corresponds exposure period prior to sampling. 
 run_tea <- function(init_TA_umolkg, init_DIC_umolkg, S, T_C,
                     kelp_density_plants_kg,
                     exposure_hours,
                     u_day_umolC_plant_h, u_night_umolC_plant_h,
-                    start_datetime, day_hours,
+                    end_datetime, day_hours,
                     lon = -126.6,
-                    utc_offset = as.numeric(format(start_datetime, "%z")) / 100) {
+                    utc_offset = as.numeric(format(end_datetime, "%z")) / 100) {
   
   stopifnot(exposure_hours <= 24)
+  
+  # End-aligned: the run finishes at the sample time, so it starts exposure_hours earlier
+  start_datetime <- end_datetime - exposure_hours * 3600
   
   # Hourly steps, plus a final partial step if exposure is not a whole number of hours
   times_h <- c(0, seq_len(floor(exposure_hours)))
@@ -604,6 +615,7 @@ run_tea <- function(init_TA_umolkg, init_DIC_umolkg, S, T_C,
 # Returns modeled pH and DIC changes, along with diagnostics for debugging,
 # including: successful runs ($sims), failed runs ($failures), and every 
 # attempted run with inputs ($grid_ok).
+# NB: Hourly exposure intervals only.
 simulate_dens_landscape <- function(pairs_df, kelp_df, env_daily,
                                     kelp_density_plants_m2_vec,
                                     exposure_hours_vec,
@@ -637,7 +649,7 @@ simulate_dens_landscape <- function(pairs_df, kelp_df, env_daily,
   water_mass_kg <- box_area_m2 * box_depth_m * seawater_kg_m3   # 10,250 kg for the default box
   grid_ok <- pairs2 %>%
     tidyr::crossing(kelp_density_plants_m2 = kelp_density_plants_m2_vec,
-                    exposure_hours     = exposure_hours_vec) %>%
+                    exposure_hours = exposure_hours_vec) %>%
     mutate(
       .row_id = row_number(),
       kelp_density_plants_kg = kelp_density_plants_m2 * box_area_m2 / water_mass_kg,
@@ -666,7 +678,7 @@ simulate_dens_landscape <- function(pairs_df, kelp_df, env_daily,
               kelp_density_plants_kg = r$kelp_density_plants_kg,
               exposure_hours = r$exposure_hours,
               u_day_umolC_plant_h = r$u_day, u_night_umolC_plant_h = r$u_night,
-              start_datetime = r$DateTime_Out, day_hours = r$day_hours),
+              end_datetime = r$DateTime_In, day_hours = r$day_hours),
       error = function(e) e)
     
     if (inherits(tea_res, "error")) {
@@ -1218,7 +1230,7 @@ plot_density_exposure_dpH <- function(sims,
 
 
 #------------ Set of functions to plot simulations with in-out data ----------------
-#--- MAKES ONE BIG plot ... 
+#--- MAKES ONE BIG plot ... called from LSSM_main.R 
 
 # 1) Build a list of all the interpolated density/exposure surfaces
 build_interp_grid_data <- function(sims,
@@ -1265,7 +1277,8 @@ build_interp_grid_data <- function(sims,
   dplyr::bind_rows(surf_list)
 }
 
-# 2) A wrapper around summarise_contour_availability() to do all sites in sims.
+# 2) A wrapper around summarise_contour_availability(). Creates a contour for 
+# each site in the sims df. 
 summarise_contour_availability_all_sites <- function(sims,
                                                      nx = 200,
                                                      ny = 200,
@@ -1291,10 +1304,17 @@ summarise_contour_availability_all_sites <- function(sims,
   }))
 }
 
-# 2) Plot full grid with date- and site-specific observed contours
+# Helper function for plotting the tea grid
+signed_sqrt <- scales::trans_new(
+  "signed_sqrt",
+  transform = function(x) sign(x) * sqrt(abs(x)),
+  inverse   = function(x) sign(x) * x^2
+)
+
+# 2) Plot full tea grid with date- and site-specific observed contours
 plot_interp_grid_sites_dates <- function(surfaces,
                                          z_col = "dpH_end",
-                                         log10_density = TRUE) {
+                                         log10_density = TRUE ) {
   
   req <- c("Site", "Date", "exposure_hours", "kelp_density_plants_m2", "dpH_obs", z_col)
   miss <- setdiff(req, names(surfaces))
@@ -1318,10 +1338,14 @@ plot_interp_grid_sites_dates <- function(surfaces,
   ) +
     ggplot2::geom_raster() +
     ggplot2::facet_grid(Date ~ Site) +
+    
+    # Use a signed square root gradient
     ggplot2::scale_fill_gradientn(
-      colours = hcl.colors(200, "RdYlBu", rev = TRUE),
+      colours  = hcl.colors(200, "RdYlBu", rev = TRUE),
+      trans    = signed_sqrt,
+      breaks   = c(0, 0.02, 0.05, 0.1, 0.2, 0.3),
       na.value = "grey90",
-      name = expression(Delta * "pH (end − out)")
+      name     = expression(Delta * "pH (end − out)")
     ) +
     ggplot2::labs(
       title = "Interpolated kelp-driven pH response surface",
@@ -1376,30 +1400,30 @@ plot_interp_grid_sites_dates <- function(surfaces,
           z = .data[[z_col]]
         ),
         breaks = dpH,
-        colour = "grey",
+        colour = "black",
         linetype = "dashed",
-        linewidth = 0.5
+        linewidth = 0.6
       )
   }
   
-  # Add dpH as text to each panel
+  # To add dpH as text to each panel, need to make a label along with 
+  # The coordinates where the label will go. Gets passed to ggplot2 
+  label_df <- surfaces %>%
+    dplyr::distinct(Site, Date, dpH_obs) %>%
+    dplyr::mutate(x_lab = min(surfaces$exposure_hours, na.rm = TRUE),
+                  y_lab = min(surfaces$kelp_density_plants_m2[surfaces$kelp_density_plants_m2 > 0],
+                              na.rm = TRUE) * 1.15) # small nudge up
+
   p <- p +
     ggplot2::geom_text(
-      data = label_df,
-      inherit.aes = FALSE,
-      ggplot2::aes(
-        x = x_lab,
-        y = y_lab,
-        label = sprintf("ΔpHobs=%.3f", dpH_obs)
-      ),
-      colour = "white",
-      hjust = -0.5,
-      vjust = 20,
-      size = 3
+      data = label_df, inherit.aes = FALSE,
+      ggplot2::aes(x = x_lab, y = y_lab,
+                   label = sprintf("\u0394pH obs = %.3f", dpH_obs)),
+      colour = "white", hjust = 0, vjust = 0, size = 3
     )
-  #hjust 1=left of plot; 0.5 = middle of plot
-  #vjust 1=top of plot; 0=missing; -0.3=missing, 0.3=just above top. Ah. increasing
-  #   values move text down today. hjust has a different scale.
+  # hjust 1=left of plot; 0.5 = middle of plot
+  # vjust 1=top of plot; 0=missing; -0.3=missing, 0.3=just above top. Ah. increasing
+  # values move text down today. hjust has a different scale.
   
   return( p )
 }
